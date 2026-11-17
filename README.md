@@ -65,6 +65,7 @@ SELECT user_id, 'Operator' FROM user_account WHERE username = '帳號';
 ```bash
 npm run db:reset                           # 移除並重建資料表（之後不需要再執行 db:init）
 npm run db:migrate                         # 保留資料，把較早建立的資料庫升級到目前的結構
+npm run db:export                          # 每張表匯出成一個 CSV，放在 exports/（不含密碼雜湊）
 npm run db:seed                            # 40 帳號、600 篇日記
 npm run db:seed -- --scale=full            # 計畫書的建置目標
 npm run db:seed -- --users=500             # 指定帳號數，其餘依比例

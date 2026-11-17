@@ -11,6 +11,7 @@
     "db:migrate": "node scripts/db.js migrate",
     "db:reset": "node scripts/db.js reset",
     "db:seed": "node scripts/seed.js",
+    "db:export": "node scripts/export.js",
     "test": "node --test test/*.test.js"
   },
   "engines": {
