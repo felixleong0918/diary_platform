@@ -38,7 +38,7 @@ export function errorHandler(err, req, res, _next) {
     return res.status(400).json({ error: { code: 'bad_request', message: '資料不符合欄位限制' } });
   }
   if (err?.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ error: { code: 'bad_request', message: '照片大小不可超過 5 MB' } });
+    return res.status(400).json({ error: { code: 'bad_request', message: '照片大小不可超過 4 MB' } });
   }
   console.error(err);
   res.status(500).json({ error: { code: 'internal', message: '伺服器發生錯誤' } });

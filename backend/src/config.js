@@ -10,8 +10,16 @@ export const config = {
   mongoUrl: process.env.MONGO_URL ?? 'mongodb://localhost:27017',
   mongoDb: process.env.MONGO_DB || 'diary_events',
   jwtSecret: process.env.JWT_SECRET || 'dev-only-secret-change-me',
-  cookieSecure: process.env.COOKIE_SECURE === 'true',
+  cookieSecure: process.env.COOKIE_SECURE === 'true' || Boolean(process.env.VERCEL),
   uploadDir: path.resolve(root, process.env.UPLOAD_DIR || 'uploads'),
+  // 設定後照片改存 Supabase Storage 的私有 bucket（部署到 Vercel 時必填）
+  supabaseUrl: process.env.SUPABASE_URL || '',
+  supabaseKey: process.env.SUPABASE_SERVICE_KEY || '',
+  supabaseBucket: process.env.SUPABASE_BUCKET || 'diary-photos',
+  databaseSsl: process.env.DATABASE_SSL === 'true',
+  databaseCaCert: process.env.DATABASE_CA_CERT || '',
+  poolMax: Number(process.env.PG_POOL_MAX || (process.env.VERCEL ? 3 : 10)),
+  onVercel: Boolean(process.env.VERCEL),
   frontendDist: path.resolve(root, '../frontend/dist'),
 };
 

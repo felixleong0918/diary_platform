@@ -12,9 +12,9 @@ import socialRoutes from './routes/social.js';
 import operatorRoutes from './routes/operator.js';
 
 export function createApp() {
-  fs.mkdirSync(config.uploadDir, { recursive: true });
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '200kb' }));
   app.use(cookieParser());
 

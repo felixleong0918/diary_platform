@@ -1,5 +1,5 @@
 // 用法：node scripts/db.js init   建立 12 張資料表與索引
-//       node scripts/db.js reset  清空 public schema 後重新建立（會刪除所有資料）
+//       node scripts/db.js reset  移除本專案的資料表後重新建立（會刪除所有資料）
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +15,15 @@ if (!['init', 'reset'].includes(mode)) {
 
 try {
   if (mode === 'reset') {
-    await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    console.log('已清空 public schema');
+    // 只移除本專案的物件，不動 public schema 本身（Supabase 在上面設有預設權限）
+    await pool.query(`
+      DROP TABLE IF EXISTS diary_tag, blog_follow, diary_favorite, guestbook_entry, comment, tag,
+        diary_entry, category, blog, theme, user_role, user_account CASCADE;
+      DROP FUNCTION IF EXISTS make_id(char, regclass);
+      DROP SEQUENCE IF EXISTS user_account_seq, theme_seq, blog_seq, diary_entry_seq, tag_seq,
+        comment_seq, guestbook_seq;
+    `);
+    console.log('已移除本專案的資料表、序列與函式');
   }
   for (const file of ['schema.sql', 'indexes.sql']) {
     await pool.query(await fs.readFile(path.join(dbDir, file), 'utf8'));

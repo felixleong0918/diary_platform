@@ -203,4 +203,23 @@ CREATE TABLE diary_tag (
   PRIMARY KEY (entry_id, tag_id)
 );
 
+-- ---------------------------------------------------------------------
+-- Row Level Security
+-- Supabase 會替 public schema 的資料表自動產生對外的 Data API。
+-- 啟用 RLS 且不建立任何 policy，等於只有資料表擁有者（後端使用的連線角色）能存取，
+-- 匿名金鑰讀不到密碼雜湊或私密日記。在本機 PostgreSQL 上對擁有者沒有影響。
+-- ---------------------------------------------------------------------
+ALTER TABLE user_account    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_role       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE theme           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blog            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE category        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE diary_entry     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tag             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comment         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE guestbook_entry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE diary_favorite  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blog_follow     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE diary_tag       ENABLE ROW LEVEL SECURITY;
+
 COMMIT;

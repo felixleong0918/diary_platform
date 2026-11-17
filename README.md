@@ -10,7 +10,7 @@
 | 後端 | Node.js 20+ / Express，直接撰寫 SQL（`pg`，不經 ORM） |
 | 關聯式資料庫 | PostgreSQL 16，12 張資料表 |
 | NoSQL | MongoDB 7，只儲存公開搜尋與頁面瀏覽事件 |
-| 照片 | 後端本機資料夾 `backend/uploads/`，資料庫只存位置 |
+| 照片 | 本機存在 `backend/uploads/`，部署時存在 Supabase Storage 的私有 bucket；資料庫只存位置 |
 
 ## 快速開始
 
@@ -77,10 +77,14 @@ INSERT INTO user_role (user_id, role)
 SELECT user_id, 'Operator' FROM user_account WHERE username = '帳號';
 ```
 
+## 部署
+
+部署到 Vercel（前端與後端）加 Supabase（PostgreSQL 與照片）、MongoDB Atlas 的步驟在 [DEPLOY.md](DEPLOY.md)。
+
 ## 假資料規模
 
 ```bash
-npm run db:reset                    # 清空並重建資料表（會刪除所有資料）
+npm run db:reset                    # 移除並重建資料表（會刪除所有資料）
 npm run db:seed                     # 示範規模：40 帳號、600 日記
 npm run db:seed -- --scale=full     # 計畫書 2.7 的建置目標
 npm run db:seed -- --users=500      # 只給帳號數，其餘依計畫書比例推算
@@ -166,7 +170,8 @@ TEST_DATABASE_URL=postgres://diary:diary@localhost:5432/diary_test npm test
 
 ```
 diary-blog-platform/
-├── docker-compose.yml        PostgreSQL + MongoDB
+├── docker-compose.yml        PostgreSQL + MongoDB（本機）
+├── vercel.json、api/         Vercel 部署設定與函式進入點
 ├── db/                       schema、索引、代表性查詢
 ├── backend/
 │   ├── src/
@@ -175,6 +180,7 @@ diary-blog-platform/
 │   │   ├── access.js         可見性規則與鎖定順序
 │   │   ├── auth.js           登入 cookie、身分檢查
 │   │   ├── mongo.js          事件寫入與彙總 pipeline
+│   │   ├── storage.js        照片儲存（本機資料夾或 Supabase Storage）
 │   │   └── routes/           auth、blogs、entries、social、operator
 │   ├── scripts/              db.js（建表／重置）、seed.js（假資料）
 │   ├── test/

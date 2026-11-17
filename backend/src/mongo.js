@@ -6,6 +6,12 @@ import { config } from './config.js';
  *   { ts, session, type: 'search' | 'view', target, target_type, keyword? }
  * 不儲存私密內文、心情分數或密碼。MongoDB 無法連線時 API 仍照常運作，只是不記錄事件。
  */
+// Vercel 會在回應送出後凍結函式；waitUntil 讓事件寫入完成後才凍結
+let waitUntil = null;
+if (process.env.VERCEL) {
+  try { ({ waitUntil } = await import('@vercel/functions')); } catch { /* 沒有這個套件時照常運作 */ }
+}
+
 let events = null;
 let client = null;
 
@@ -36,7 +42,8 @@ export function logEvent(req, type, { target = null, target_type = null, keyword
   if (!events) return;
   const doc = { ts: new Date(), session: req.sessionId, type, target, target_type };
   if (keyword) doc.keyword = String(keyword).slice(0, 100);
-  events.insertOne(doc).catch((err) => console.warn('[mongo] 事件寫入失敗', err.message));
+  const pending = events.insertOne(doc).catch((err) => console.warn('[mongo] 事件寫入失敗', err.message));
+  waitUntil?.(pending);
 }
 
 /**

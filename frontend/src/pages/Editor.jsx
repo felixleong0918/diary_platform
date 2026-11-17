@@ -70,7 +70,7 @@ export default function Editor() {
   const pickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 5 * 1024 * 1024) { fail({ message: '照片大小不可超過 5 MB' }); e.target.value = ''; return; }
+    if (f.size > 4 * 1024 * 1024) { fail({ message: '照片大小不可超過 4 MB' }); e.target.value = ''; return; }
     setFile(f);
     setRemovePhoto(false);
   };

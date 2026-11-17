@@ -2,6 +2,7 @@
   "name": "diary-blog-platform",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "日記與個人部落格平台（資料庫管理 115-1 期末專案，第 16 組）",
   "scripts": {
     "setup": "npm install --prefix backend && npm install --prefix frontend",

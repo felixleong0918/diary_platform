@@ -1,9 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import crypto from 'node:crypto';
-import path from 'node:path';
-import fs from 'node:fs/promises';
-import { config } from '../config.js';
+import * as storage from '../storage.js';
 import { query, tx } from '../db.js';
 import { wrap, badRequest, unavailable, conflict } from '../errors.js';
 import { requireLogin, requireActive } from '../auth.js';
@@ -250,25 +248,27 @@ router.delete('/entries/:entryId', requireActive, wrap(async (req, res) => {
 
 // ---- 照片：資料庫只存位置，讀取仍須通過日記權限檢查 ---------------------
 const MIME_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+// 檔案先放在記憶體再交給 storage（本機資料夾或 Supabase Storage）。
+// 上限 4 MB：Vercel 函式的請求內容上限是 4.5 MB。
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, config.uploadDir),
-    filename: (_req, file, cb) => cb(null, crypto.randomUUID() + MIME_EXT[file.mimetype]),
-  }),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (MIME_EXT[file.mimetype]) cb(null, true);
     else cb(badRequest('照片只接受 JPG、PNG、WebP 或 GIF'));
   },
 });
 
-const removeFile = (location) =>
-  location && fs.unlink(path.join(config.uploadDir, path.basename(location))).catch(() => {});
-
 router.put('/entries/:entryId/photo', requireActive, upload.single('photo'), wrap(async (req, res) => {
   if (!req.file) throw badRequest('請選擇一張照片');
+  const entryId = id(req.params.entryId, '日記代號', 'E');
+  const owned = await query(
+    `SELECT 1 FROM diary_entry WHERE entry_id = $1 AND blog_id = $2 AND status <> 'deleted'`,
+    [entryId, req.user.blog_id],
+  );
+  if (!owned.rows[0]) throw unavailable();
+  const location = await storage.save(crypto.randomUUID() + MIME_EXT[req.file.mimetype], req.file.buffer);
   try {
-    const entryId = id(req.params.entryId, '日記代號', 'E');
     const old = await tx(async (client) => {
       const cur = await client.query(
         `SELECT photo_url FROM diary_entry
@@ -278,14 +278,14 @@ router.put('/entries/:entryId/photo', requireActive, upload.single('photo'), wra
       if (!cur.rows[0]) throw unavailable();
       await client.query('UPDATE diary_entry SET photo_url = $2, updated_at = now() WHERE entry_id = $1', [
         entryId,
-        `media/${req.file.filename}`,
+        location,
       ]);
       return cur.rows[0].photo_url;
     });
-    await removeFile(old);
+    await storage.remove(old);
     res.json({ ok: true });
   } catch (err) {
-    await removeFile(req.file.filename);
+    await storage.remove(location);
     throw err;
   }
 }));
@@ -301,7 +301,7 @@ router.delete('/entries/:entryId/photo', requireActive, wrap(async (req, res) =>
     [entryId, req.user.blog_id],
   );
   if (!rows[0]) throw unavailable();
-  await removeFile(rows[0].photo_url);
+  await storage.remove(rows[0].photo_url);
   res.json({ ok: true });
 }));
 
@@ -309,10 +309,10 @@ router.get('/entries/:entryId/photo', wrap(async (req, res) => {
   const entryId = id(req.params.entryId, '日記代號', 'E');
   const ctx = await loadContext(entryId);
   if (!ctx || !ctx.photo_url || !canRead(ctx, req.user?.user_id ?? null)) throw unavailable();
+  const file = await storage.read(ctx.photo_url);
+  if (!file) throw unavailable();
   res.set('Cache-Control', 'private, no-store');
-  res.sendFile(path.join(config.uploadDir, path.basename(ctx.photo_url)), (err) => {
-    if (err && !res.headersSent) res.status(404).json({ error: { code: 'unavailable', message: '內容目前無法瀏覽' } });
-  });
+  res.type(file.contentType).send(file.buffer);
 }));
 
 // ---- 回顧個人紀錄 -------------------------------------------------------
