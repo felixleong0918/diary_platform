@@ -37,3 +37,9 @@ CREATE INDEX IF NOT EXISTS guestbook_user_idx  ON guestbook_entry (user_id);
 -- 互動數量彙總、被追蹤數
 CREATE INDEX IF NOT EXISTS diary_favorite_entry_idx ON diary_favorite (entry_id);
 CREATE INDEX IF NOT EXISTS blog_follow_blog_idx     ON blog_follow (blog_id);
+
+-- 表情回應、回覆與通知
+CREATE INDEX IF NOT EXISTS diary_reaction_entry_idx ON diary_reaction (entry_id, reaction);
+CREATE INDEX IF NOT EXISTS comment_parent_idx       ON comment (parent_id) WHERE parent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS notification_user_idx    ON notification (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS notification_unread_idx  ON notification (user_id) WHERE read_at IS NULL;

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { useAuth } from './context.jsx';
+import { useAuth, useUnread } from './context.jsx';
 import NavBar from './components/NavBar.jsx';
 import Explore from './pages/Explore.jsx';
 import { Login, Register } from './pages/Auth.jsx';
@@ -12,6 +12,7 @@ import Settings from './pages/Settings.jsx';
 import Following from './pages/Following.jsx';
 import Favorites from './pages/Favorites.jsx';
 import Operator from './pages/Operator.jsx';
+import Notifications from './pages/Notifications.jsx';
 import { Empty } from './components/ui.jsx';
 
 function Protected({ operator = false, children }) {
@@ -21,6 +22,12 @@ function Protected({ operator = false, children }) {
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   if (operator && !isOperator) return <Navigate to="/" replace />;
   return children;
+}
+
+function NotificationsRoute() {
+  const { user } = useAuth();
+  const { clearUnread } = useUnread();
+  return <Notifications myBlogId={user.blog_id} onRead={clearUnread} />;
 }
 
 export default function App() {
@@ -42,6 +49,7 @@ export default function App() {
         <Route path="/settings" element={<Protected><Settings /></Protected>} />
         <Route path="/following" element={<Protected><Following /></Protected>} />
         <Route path="/favorites" element={<Protected><Favorites /></Protected>} />
+        <Route path="/notifications" element={<Protected><NotificationsRoute /></Protected>} />
         <Route path="/operator" element={<Protected operator><Operator /></Protected>} />
         <Route path="*" element={<main className="page is-narrow"><Empty title="找不到這個頁面">網址可能有誤，或頁面已經不存在。</Empty></main>} />
       </Routes>

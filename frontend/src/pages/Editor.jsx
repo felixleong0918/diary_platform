@@ -3,10 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, photoUrl, today } from '../api.js';
 import { useAuth, useFeedback } from '../context.jsx';
 import Icon from '../components/Icon.jsx';
-import { Button, Empty, Field, Segmented } from '../components/ui.jsx';
+import { Button, Empty, Field, Segmented, SongField } from '../components/ui.jsx';
 
 const MOODS = ['很差', '不太好', '普通', '不錯', '很好'];
-const BLANK = { entry_date: today(), title: '', content: '', mood_score: null, category_no: '', visibility: 'private', tag_ids: [] };
+const BLANK = { entry_date: today(), title: '', content: '', mood_score: null, category_no: '', visibility: 'private', tag_ids: [], song_url: '', song_title: '' };
 
 export default function Editor() {
   const { entryId } = useParams();
@@ -25,6 +25,8 @@ export default function Editor() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const [tagBusy, setTagBusy] = useState(false);
 
   const load = async () => {
     try {
@@ -47,6 +49,7 @@ export default function Editor() {
         setForm({
           entry_date: e.entry_date, title: e.title, content: e.content, mood_score: e.mood_score,
           category_no: e.category_no ?? '', visibility: e.visibility, tag_ids: e.tags.map((t) => t.tag_id),
+          song_url: e.song_url || '', song_title: e.song_title || '',
         });
       }
       setConflict(false);
@@ -67,6 +70,19 @@ export default function Editor() {
 
   const set = (name, value) => setForm((f) => ({ ...f, [name]: value }));
   const toggleTag = (id) => set('tag_ids', form.tag_ids.includes(id) ? form.tag_ids.filter((t) => t !== id) : [...form.tag_ids, id]);
+  // 自訂標籤：後端會把名稱標準化，已存在的標籤直接沿用
+  const addTag = async () => {
+    const name = newTag.trim();
+    if (!name || tagBusy) return;
+    if (form.tag_ids.length >= 10) { fail({ message: '一篇日記最多 10 個標籤' }); return; }
+    setTagBusy(true);
+    try {
+      const { tag } = await api.post('/tags', { tag_name: name });
+      setMeta((m) => (m.tags.some((t) => t.tag_id === tag.tag_id) ? m : { ...m, tags: [...m.tags, { ...tag, status: 'active' }] }));
+      setForm((f) => (f.tag_ids.includes(tag.tag_id) ? f : { ...f, tag_ids: [...f.tag_ids, tag.tag_id] }));
+      setNewTag('');
+    } catch (err) { fail(err); } finally { setTagBusy(false); }
+  };
   const pickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -181,7 +197,16 @@ export default function Editor() {
               );
             })}
           </div>
+          <div className="row is-tight" style={{ marginTop: 4 }}>
+            <input className="input" style={{ maxWidth: 220 }} maxLength={30} placeholder="自訂標籤" aria-label="自訂標籤名稱" value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }} />
+            <Button type="button" busy={tagBusy} disabled={!newTag.trim()} onClick={addTag}><Icon name="plus" size={16} />新增標籤</Button>
+          </div>
+          <small>找不到想要的標籤可以自己新增，最多選 10 個</small>
         </div>
+
+        <SongField label="這篇日記的歌" value={{ song_url: form.song_url, song_title: form.song_title }} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
 
         <div className="field">
           <span>照片</span>

@@ -318,6 +318,157 @@ test('營運統計只含公開內容', async () => {
   assert.deepEqual(await (await op.get('/api/operator/analytics')).body, { available: false, days: 30 });
 });
 
+test('自訂標籤：標準化後沿用既有標籤，停用的不能再選', async () => {
+  assert.equal((await guest.post('/api/tags', { tag_name: '手沖' })).status, 401);
+  const made = await alice.post('/api/tags', { tag_name: ' #Coffee ' });
+  assert.equal(made.status, 201);
+  assert.equal(made.body.tag.tag_name, 'coffee');
+  const again = await bob.post('/api/tags', { tag_name: 'COFFEE' });
+  assert.equal(again.body.tag.tag_id, made.body.tag.tag_id, '不重複建立');
+  assert.equal((await alice.post('/api/tags', { tag_name: '舊標籤' })).status, 409);
+  assert.equal((await alice.post('/api/tags', { tag_name: '有 空白' })).status, 400);
+  const e = await alice.post('/api/entries', entryBody({ tag_ids: [made.body.tag.tag_id] }));
+  assert.equal(e.status, 201);
+});
+
+test('歌曲連結與個人風格：連結與歌名成對、只接受 https', async () => {
+  const song = { song_url: 'https://example.com/song/1', song_title: '夜晚的歌' };
+  assert.equal((await alice.post('/api/entries', entryBody({ song_url: 'http://example.com/a', song_title: 'x' }))).status, 400);
+  assert.equal((await alice.post('/api/entries', entryBody({ song_url: 'https://example.com/a' }))).status, 400, '有連結必須有歌名');
+  assert.equal((await alice.post('/api/entries', entryBody({ song_title: '只有歌名' }))).status, 400);
+  const created = await alice.post('/api/entries', entryBody({ ...song, visibility: 'public' }));
+  assert.equal(created.status, 201);
+  const read = (await bob.get(`/api/entries/${created.body.entry.entry_id}`)).body.entry;
+  assert.equal(read.song_title, '夜晚的歌');
+  assert.equal(read.song_url, 'https://example.com/song/1');
+
+  const space = (await alice.get('/api/me/space')).body;
+  const body = { nickname: space.nickname, blog_name: space.blog.blog_name, description: '', theme_id: space.blog.theme_id };
+  assert.equal((await alice.put('/api/me/space', { ...body, cover_pattern: 'stars' })).status, 400);
+  assert.equal((await alice.put('/api/me/space', { ...body, tagline: '慢慢來', cover_pattern: 'waves', title_font: 'mono', ...song })).status, 200);
+  const blog = (await guest.get(`/api/blogs/${ids.alice.blog_id}`)).body.blog;
+  assert.deepEqual([blog.tagline, blog.cover_pattern, blog.title_font, blog.song_title], ['慢慢來', 'waves', 'mono', '夜晚的歌']);
+  assert.equal((await alice.put('/api/me/space', body)).status, 200, '舊版表單不帶新欄位也能儲存');
+  assert.equal((await guest.get(`/api/blogs/${ids.alice.blog_id}`)).body.blog.song_title, null);
+
+  assert.equal((await guest.get('/api/song-info?url=https://youtu.be/x')).status, 401);
+  const other = await alice.get(`/api/song-info?url=${encodeURIComponent('https://example.com/song/1')}`);
+  assert.deepEqual(other.body, { provider: null, title: null }, '不支援的網站不會被連線');
+});
+
+test('表情回應、回覆、@提及與通知', async () => {
+  const pub = (await alice.post('/api/entries', entryBody({ visibility: 'public', title: '互動測試' }))).body.entry.entry_id;
+  await alice.post('/api/me/notifications/read');
+
+  // 表情：每人一種，可以更換與取消；私密日記不能回應
+  assert.equal((await guest.put(`/api/entries/${pub}/reaction`, { reaction: 'like' })).status, 401);
+  assert.equal((await bob.put(`/api/entries/${pub}/reaction`, { reaction: 'wow' })).status, 400);
+  assert.equal((await bob.put(`/api/entries/${ids.privateEntry}/reaction`, { reaction: 'like' })).status, 404);
+  assert.equal((await bob.put(`/api/entries/${pub}/reaction`, { reaction: 'like' })).body.my_reaction, 'like');
+  const changed = (await bob.put(`/api/entries/${pub}/reaction`, { reaction: 'hug' })).body;
+  assert.deepEqual([changed.reactions.like, changed.reactions.hug, changed.my_reaction], [0, 1, 'hug']);
+  assert.equal((await guest.get(`/api/entries/${pub}/reactions`)).body.reactions.hug, 1);
+
+  // 回覆只有一層，且必須屬於同一篇日記
+  const top = (await bob.post(`/api/entries/${pub}/comments`, { content: '第一則 @alice 你好' })).body.comment;
+  const reply = (await alice.post(`/api/entries/${pub}/comments`, { content: '謝謝 @bob', parent_id: top.comment_id })).body.comment;
+  assert.equal(reply.parent_id, top.comment_id);
+  const nested = (await bob.post(`/api/entries/${pub}/comments`, { content: '再回', parent_id: reply.comment_id })).body.comment;
+  assert.equal(nested.parent_id, top.comment_id, '回覆的回覆掛在同一則最上層留言');
+  assert.equal((await bob.post(`/api/entries/${pub}/comments`, { content: 'x', parent_id: ids.comment })).status, 404, '不能回覆別篇日記的留言');
+  const listed = (await guest.get(`/api/entries/${pub}/comments`)).body;
+  assert.equal(listed.comments.length, 3);
+  assert.equal(listed.mentions.bob, ids.bob.blog_id);
+
+  // 通知：alice 收到表情（只一則）、留言；bob 收到回覆（不重複收到提及）
+  const forAlice = (await alice.get('/api/me/notifications')).body;
+  assert.deepEqual(forAlice.notifications.filter((n) => !n.read_at).map((n) => n.kind).sort(), ['comment', 'reaction', 'reply']);
+  assert.equal(forAlice.unread_count, 3);
+  assert.equal(forAlice.notifications.find((n) => n.kind === 'reaction').reaction, 'hug');
+  const forBob = (await bob.get('/api/me/notifications')).body.notifications.filter((n) => n.entry_id === pub);
+  assert.deepEqual(forBob.map((n) => n.kind), ['reply']);
+  assert.equal((await alice.post('/api/me/notifications/read')).body.unread_count, 0);
+  assert.equal((await alice.get('/api/me/notifications/unread-count')).body.unread_count, 0);
+
+  // 日記改為私密後，通知不再透露標題
+  const cur = (await alice.get(`/api/entries/${pub}`)).body.entry;
+  await alice.put(`/api/entries/${pub}`, entryBody({ visibility: 'private', title: '互動測試', version: cur.version }));
+  const hiddenFromBob = (await bob.get('/api/me/notifications')).body.notifications.find((n) => n.kind === 'reply');
+  assert.equal(hiddenFromBob.entry_title, null);
+  assert.equal(hiddenFromBob.comment_excerpt, null);
+
+  assert.equal((await bob.del(`/api/entries/${pub}/reaction`)).body.my_reaction, null);
+});
+
+test('大頭貼與現在的心情', async () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const form = new FormData();
+  form.append('avatar', new Blob([png], { type: 'image/png' }), 'a.png');
+  assert.equal((await alice.upload('/api/me/avatar', form)).status, 200);
+  const me = (await alice.get('/api/auth/me')).body.user;
+  assert.match(me.avatar, /^\/api\/avatars\/U\d{8}\?v=/);
+  const img = await fetch(`${base}${me.avatar}`);
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+  const text = new FormData();
+  text.append('avatar', new Blob(['hello'], { type: 'text/plain' }), 'a.txt');
+  assert.equal((await alice.upload('/api/me/avatar', text)).status, 400);
+  assert.equal((await alice.del('/api/me/avatar')).status, 200);
+  assert.equal((await fetch(`${base}/api/avatars/${ids.alice.user_id}`)).status, 404);
+
+  assert.equal((await alice.put('/api/me/status', { status_text: '期末週，努力中', duration: '4h' })).status, 200);
+  assert.equal((await guest.get(`/api/blogs/${ids.alice.blog_id}`)).body.blog.owner_status_text, '期末週，努力中');
+  await pool.query(`UPDATE user_account SET status_expires_at = now() - interval '1 minute' WHERE user_id = $1`, [ids.alice.user_id]);
+  assert.equal((await guest.get(`/api/blogs/${ids.alice.blog_id}`)).body.blog.owner_status_text, null, '到期後不再顯示');
+  assert.equal((await alice.put('/api/me/status', { status_text: 'x', duration: '1y' })).status, 400);
+  assert.equal((await alice.del('/api/me/status')).status, 200);
+});
+
+test('Dashboard：各序列長度與期間一致，不含私密內文', async () => {
+  assert.equal((await alice.get('/api/operator/dashboard')).status, 403);
+  const r = await op.get('/api/operator/dashboard?days=14');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.daily.length, 14);
+  assert.equal(r.body.period.accounts.cur, 3);
+  assert.equal(r.body.composition.public_mood.length, 5);
+  assert.equal(r.body.daily.at(-1).accounts, 3, '今天註冊的三個帳號');
+  const v = r.body.composition.visibility;
+  assert.equal(typeof v.public, 'number');
+  assert.equal(typeof v.private, 'number');
+  assert.equal(JSON.stringify(r.body).includes('私密的事'), false);
+});
+
+test('身分管理：授予與撤銷 Operator，不能變更自己', async () => {
+  assert.equal((await alice.put(`/api/operator/users/${ids.bob.user_id}/roles`, { operator: true })).status, 403);
+  assert.equal((await op.put(`/api/operator/users/${ids.op.user_id}/roles`, { operator: false })).status, 400);
+  assert.equal((await op.put(`/api/operator/users/${ids.bob.user_id}/roles`, { operator: 'yes' })).status, 400);
+  assert.equal((await op.put(`/api/operator/users/${ids.bob.user_id}/roles`, { operator: true })).status, 200);
+  assert.equal((await op.put(`/api/operator/users/${ids.bob.user_id}/roles`, { operator: true })).status, 200, '重複授予不出錯');
+  assert.equal((await bob.get('/api/operator/stats')).status, 200, '授予後立即生效');
+  const ops = (await op.get('/api/operator/blogs?role=Operator')).body.blogs.map((b) => b.username).sort();
+  assert.deepEqual(ops, ['bob', 'opuser']);
+  const detail = await op.get(`/api/operator/users/${ids.bob.user_id}`);
+  assert.equal(detail.status, 200);
+  assert.deepEqual(detail.body.account.roles, ['Operator', 'User']);
+  assert.equal(typeof detail.body.account.followers, 'number');
+  assert.equal((await op.put(`/api/operator/users/${ids.bob.user_id}/roles`, { operator: false })).status, 200);
+  assert.equal((await bob.get('/api/operator/stats')).status, 403, '撤銷後立即失效');
+});
+
+test('營運者永久刪除：只限公開內容，刪除後作者也讀不到', async () => {
+  const pub = (await alice.post('/api/entries', entryBody({ visibility: 'public', title: '要被刪除的公開日記' }))).body.entry.entry_id;
+  const c = (await bob.post(`/api/entries/${pub}/comments`, { content: '要被刪除的留言' })).body.comment.comment_id;
+  assert.equal((await alice.del(`/api/operator/entries/${pub}`)).status, 403);
+  assert.equal((await op.del(`/api/operator/entries/${ids.privateEntry}`)).status, 404, '私密日記不在營運者的管理範圍');
+  assert.equal((await op.del(`/api/operator/comments/${c}`)).status, 200);
+  assert.equal((await op.del(`/api/operator/comments/${c}`)).status, 404);
+  assert.equal((await op.del(`/api/operator/entries/${pub}`)).status, 200);
+  assert.equal((await alice.get(`/api/entries/${pub}`)).status, 404);
+  assert.equal((await op.put(`/api/operator/entries/${pub}/status`, { status: 'active' })).status, 404, '無法復原');
+  const kept = await pool.query('SELECT status FROM diary_entry WHERE entry_id = $1', [pub]);
+  assert.equal(kept.rows[0].status, 'deleted');
+});
+
 test('刪除日記採狀態更新，留言與收藏不連鎖刪除', async () => {
   assert.equal((await alice.del(`/api/entries/${ids.publicEntry}`)).status, 200);
   assert.equal((await alice.get(`/api/entries/${ids.publicEntry}`)).status, 404);

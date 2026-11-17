@@ -32,7 +32,7 @@
    npm run db:seed              # 或 npm run db:seed -- --scale=full
    ```
 
-`db/schema.sql` 已經替 12 張表啟用 Row Level Security 而且不建立任何 policy。Supabase 會替 `public` schema 的表自動產生對外的 Data API，這樣設定後匿名金鑰讀不到任何資料列，只有後端的資料庫連線可以存取。
+`db/schema.sql` 已經替 14 張表啟用 Row Level Security 而且不建立任何 policy。Supabase 會替 `public` schema 的表自動產生對外的 Data API，這樣設定後匿名金鑰讀不到任何資料列，只有後端的資料庫連線可以存取。
 
 ## 2. Supabase：照片 bucket
 

@@ -5,7 +5,8 @@ import { useAuth, useFeedback, usePageStyle } from '../context.jsx';
 import { useData } from '../hooks.js';
 import Icon from '../components/Icon.jsx';
 import Messages from '../components/Messages.jsx';
-import { Avatar, Button, Empty, Mood, StatusBadges } from '../components/ui.jsx';
+import Reactions from '../components/Reactions.jsx';
+import { Avatar, Button, Empty, Mood, StatusBadges, SongLink } from '../components/ui.jsx';
 
 export default function Entry() {
   const { entryId } = useParams();
@@ -55,12 +56,12 @@ export default function Entry() {
             <span>這篇日記已被營運者隱藏{e.hidden_at ? `（${formatTime(e.hidden_at)}）` : ''}。</span>
           </div>
         )}
-        <h1 className="article-title">{e.title}</h1>
+        <h1 className="article-title" data-font={e.title_font}>{e.title}</h1>
         <div className="row is-between">
           <Link to={`/blog/${e.blog_id}`} className="row" style={{ flexWrap: 'nowrap' }}>
-            <Avatar name={e.author_nickname} />
+            <Avatar name={e.author_nickname} src={e.author_avatar} />
             <span>
-              <b style={{ display: 'block', lineHeight: 1.3 }}>{e.author_nickname}</b>
+              <b style={{ display: 'block', lineHeight: 1.3 }}>{e.author_nickname}{e.author_status_text && <span className="status-chip">{e.author_status_text}</span>}</b>
               <span className="tiny">{e.blog_name} · {formatDate(e.entry_date)}{e.category_name ? ` · ${e.category_name}` : ''}</span>
             </span>
           </Link>
@@ -73,7 +74,7 @@ export default function Entry() {
         <div className="article-bar">
           {user ? (
             <Button className={`is-quiet ${e.is_favorited ? 'is-on' : ''}`} busy={favBusy} disabled={isSuspended && !e.is_favorited} onClick={toggleFavorite} aria-pressed={e.is_favorited}>
-              <Icon name="heart" filled={e.is_favorited} size={18} />
+              <Icon name="bookmark" filled={e.is_favorited} size={18} />
               {e.is_favorited ? '已收藏' : '收藏'}<span className="num">{e.favorite_count}</span>
             </Button>
           ) : (
@@ -97,6 +98,7 @@ export default function Entry() {
         {e.has_photo && (
           <div className="article-photo"><img src={photoUrl(e.entry_id, e.updated_at)} alt={`${e.title} 的照片`} /></div>
         )}
+        <SongLink title={e.song_title} url={e.song_url} />
         <div className="article-body prewrap">{e.content}</div>
 
         {e.tags.length > 0 && (
@@ -106,6 +108,7 @@ export default function Entry() {
             ))}
           </div>
         )}
+        <Reactions entryId={entryId} disabled={e.status !== 'active'} />
       </article>
 
       <section className="stack" style={{ borderTop: '1px solid var(--hairline)', paddingTop: 32, marginTop: 16 }}>
@@ -115,7 +118,7 @@ export default function Entry() {
         ) : (
           <Messages
             kind="comment" items={comments.data?.comments || []} postUrl={`/entries/${entryId}/comments`}
-            onChanged={comments.reload}
+            onChanged={comments.reload} mentions={comments.data?.mentions}
             notice={null}
             emptyText="還沒有留言。"
           />

@@ -3,7 +3,7 @@ import { query, tx } from '../db.js';
 import { wrap, badRequest, notFound, conflict } from '../errors.js';
 import { requireOperator } from '../auth.js';
 import { STYLE_KEYS } from '../config.js';
-import { PUBLIC_READABLE } from '../access.js';
+import { PUBLIC_READABLE, BLOG_VISIBLE } from '../access.js';
 import { text, int, id, oneOf, paging } from '../validate.js';
 import {
   mongoReady, eventsCollection, conversionPipeline, topKeywordsPipeline, dailyEventsPipeline,
@@ -210,6 +210,7 @@ router.get('/blogs', wrap(async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const status = oneOf(req.query.status, '狀態', ['active', 'hidden', 'closed'], { optional: true });
   const accountStatus = oneOf(req.query.account_status, '帳號狀態', ['active', 'suspended', 'deactivated'], { optional: true });
+  const role = oneOf(req.query.role, '身分', ['User', 'Operator'], { optional: true });
   const params = [limit + 1, offset];
   let where = 'TRUE';
   if (q) {
@@ -218,9 +219,10 @@ router.get('/blogs', wrap(async (req, res) => {
   }
   if (status) { params.push(status); where += ` AND b.status = $${params.length}`; }
   if (accountStatus) { params.push(accountStatus); where += ` AND u.status = $${params.length}`; }
+  if (role) { params.push(role); where += ` AND EXISTS (SELECT 1 FROM user_role r WHERE r.user_id = u.user_id AND r.role = $${params.length})`; }
   const { rows } = await query(
     `SELECT b.blog_id, b.blog_name, b.status AS blog_status, b.created_at,
-            u.user_id, u.username, u.nickname, u.status AS account_status,
+            u.user_id, u.username, u.nickname, u.email, u.status AS account_status,
             ARRAY(SELECT role FROM user_role r WHERE r.user_id = u.user_id ORDER BY role) AS roles,
             (SELECT count(*) FROM diary_entry e
               WHERE e.blog_id = b.blog_id AND e.visibility = 'public' AND e.status <> 'deleted') AS public_entry_count
@@ -242,6 +244,38 @@ router.put('/blogs/:blogId/status', wrap(async (req, res) => {
   );
   if (!rowCount) throw notFound('找不到這個空間，或空間已關閉');
   res.json({ ok: true });
+}));
+
+// 單一帳號：基本資料、各項筆數與最近的公開日記。私密日記只回傳篇數，不回傳標題與內文
+router.get('/users/:userId', wrap(async (req, res) => {
+  const userId = id(req.params.userId, '使用者代號', 'U');
+  const [account, recent] = await Promise.all([
+    query(
+      `SELECT u.user_id, u.username, u.nickname, u.email, u.status AS account_status, u.created_at,
+              b.blog_id, b.blog_name, b.status AS blog_status,
+              ARRAY(SELECT role FROM user_role r WHERE r.user_id = u.user_id ORDER BY role) AS roles,
+              (SELECT count(*) FROM diary_entry e WHERE e.blog_id = b.blog_id AND e.visibility = 'public' AND e.status = 'active') AS public_entries,
+              (SELECT count(*) FROM diary_entry e WHERE e.blog_id = b.blog_id AND e.visibility = 'private' AND e.status <> 'deleted') AS private_entries,
+              (SELECT count(*) FROM diary_entry e WHERE e.blog_id = b.blog_id AND e.status = 'hidden') AS hidden_entries,
+              (SELECT count(*) FROM comment c WHERE c.user_id = u.user_id AND c.status <> 'deleted') AS comments,
+              (SELECT count(*) FROM comment c WHERE c.user_id = u.user_id AND c.status = 'hidden') AS hidden_comments,
+              (SELECT count(*) FROM blog_follow f WHERE f.blog_id = b.blog_id) AS followers,
+              (SELECT count(*) FROM blog_follow f WHERE f.follower_id = u.user_id) AS following,
+              (SELECT max(e.published_at) FROM diary_entry e WHERE e.blog_id = b.blog_id AND e.visibility = 'public' AND e.status <> 'deleted') AS last_published_at
+         FROM user_account u JOIN blog b ON b.user_id = u.user_id
+        WHERE u.user_id = $1`,
+      [userId],
+    ),
+    query(
+      `SELECT e.entry_id, e.title, e.status, e.published_at, e.hidden_at
+         FROM diary_entry e JOIN blog b ON b.blog_id = e.blog_id
+        WHERE b.user_id = $1 AND e.visibility = 'public' AND e.status <> 'deleted'
+        ORDER BY e.published_at DESC, e.entry_id DESC LIMIT 6`,
+      [userId],
+    ),
+  ]);
+  if (!account.rows[0]) throw notFound('找不到這個帳號');
+  res.json({ account: account.rows[0], recent_public_entries: recent.rows });
 }));
 
 router.put('/users/:userId/status', wrap(async (req, res) => {
@@ -338,6 +372,178 @@ router.get('/stats', wrap(async (req, res) => {
     hot_tags: tags.rows,
     top_interactions: interactions.rows,
     weekly_active_authors: weekly.rows,
+  });
+}));
+
+// =====================================================================
+// 永久刪除：設為 deleted 後任何人都無法再讀取或復原；資料列保留以維持外鍵與統計
+// =====================================================================
+router.delete('/entries/:entryId', wrap(async (req, res) => {
+  const entryId = id(req.params.entryId, '日記代號', 'E');
+  // 與隱藏相同的範圍：公開日記，或先前被營運者隱藏的日記
+  const { rowCount } = await query(
+    `UPDATE diary_entry SET status = 'deleted', updated_at = now()
+      WHERE entry_id = $1 AND status <> 'deleted' AND (visibility = 'public' OR status = 'hidden')`,
+    [entryId],
+  );
+  if (!rowCount) throw notFound('找不到這篇日記，或它不是公開內容');
+  res.json({ ok: true });
+}));
+
+router.delete('/comments/:commentId', wrap(async (req, res) => {
+  const commentId = id(req.params.commentId, '留言代號', 'C');
+  const { rowCount } = await query(
+    `UPDATE comment SET status = 'deleted', updated_at = now() WHERE comment_id = $1 AND status <> 'deleted'`,
+    [commentId],
+  );
+  if (!rowCount) throw notFound('找不到這則留言');
+  res.json({ ok: true });
+}));
+
+router.delete('/guestbook/:guestbookId', wrap(async (req, res) => {
+  const guestbookId = id(req.params.guestbookId, '訊息代號', 'G');
+  const { rowCount } = await query(
+    `UPDATE guestbook_entry SET status = 'deleted', updated_at = now() WHERE guestbook_id = $1 AND status <> 'deleted'`,
+    [guestbookId],
+  );
+  if (!rowCount) throw notFound('找不到這則訊息');
+  res.json({ ok: true });
+}));
+
+// =====================================================================
+// 身分管理：授予或撤銷 Operator。不能變更自己；系統至少保留一位營運者
+// =====================================================================
+router.put('/users/:userId/roles', wrap(async (req, res) => {
+  const userId = id(req.params.userId, '使用者代號', 'U');
+  if (typeof req.body.operator !== 'boolean') throw badRequest('請指定是否具有營運者身分');
+  if (userId === req.user.user_id) throw badRequest('不能變更自己的營運者身分');
+  await tx(async (client) => {
+    const target = await client.query('SELECT status FROM user_account WHERE user_id = $1 FOR UPDATE', [userId]);
+    if (!target.rows[0]) throw notFound('找不到這個帳號');
+    // 鎖住所有營運者身分列，避免兩位營運者同時互相撤銷
+    const ops = await client.query(`SELECT user_id FROM user_role WHERE role = 'Operator' ORDER BY user_id FOR UPDATE`);
+    if (!ops.rows.some((r) => r.user_id === req.user.user_id)) throw conflict('not_operator', '你的營運者身分已被撤銷');
+    if (req.body.operator) {
+      if (target.rows[0].status !== 'active') throw conflict('not_active', '只能授予狀態正常的帳號');
+      await client.query(`INSERT INTO user_role (user_id, role) VALUES ($1, 'Operator') ON CONFLICT DO NOTHING`, [userId]);
+    } else {
+      await client.query(`DELETE FROM user_role WHERE user_id = $1 AND role = 'Operator'`, [userId]);
+    }
+  });
+  res.json({ ok: true });
+}));
+
+// =====================================================================
+// Dashboard：成長、貼文數量、互動、內容組成、發文時段
+// 私密日記只計入筆數；心情、分類與時段只統計他人可讀的公開日記
+// =====================================================================
+const TPE_TODAY = `(now() AT TIME ZONE 'Asia/Taipei')::date`;
+const tpeDay = (col) => `(${col} AT TIME ZONE 'Asia/Taipei')::date`;
+// 期間起點（含今天共 $1 天）與上一期起點，皆為台北時間的 00:00
+const CUR = `((${TPE_TODAY} - ($1::int - 1))::timestamp AT TIME ZONE 'Asia/Taipei')`;
+const PREV = `((${TPE_TODAY} - ($1::int * 2 - 1))::timestamp AT TIME ZONE 'Asia/Taipei')`;
+
+router.get('/dashboard', wrap(async (req, res) => {
+  const days = int(req.query.days, '天數', { min: 1, max: 365, optional: true }) || 30;
+  const pair = (table, col, extra = 'TRUE') => `
+    (SELECT count(*) FROM ${table} WHERE ${col} >= ${CUR} AND ${extra}) AS cur,
+    (SELECT count(*) FROM ${table} WHERE ${col} >= ${PREV} AND ${col} < ${CUR} AND ${extra}) AS prev`;
+  const daily = (table, col, extra = 'TRUE') =>
+    `SELECT ${tpeDay(col)} AS day, count(*) AS n FROM ${table} WHERE ${col} >= ${CUR} AND ${extra} GROUP BY 1`;
+  const PUB = `visibility = 'public' AND status <> 'deleted'`;
+  const PRIV = `visibility = 'private' AND status <> 'deleted'`;
+  const JOINED = `diary_entry e JOIN blog b ON b.blog_id = e.blog_id JOIN user_account u ON u.user_id = b.user_id`;
+
+  const [kAcc, kEnt, kCom, kFav, kFol, kRea, reactionKinds, series, before, visibility, status, mood, categories,
+    topBlogs, topAuthors, heat] = await Promise.all([
+    query(`SELECT ${pair('user_account', 'created_at')}`, [days]),
+    query(`SELECT ${pair('diary_entry', 'published_at', PUB)}`, [days]),
+    query(`SELECT ${pair('comment', 'created_at', `status <> 'deleted'`)}`, [days]),
+    query(`SELECT ${pair('diary_favorite', 'created_at')}`, [days]),
+    query(`SELECT ${pair('blog_follow', 'followed_at')}`, [days]),
+    query(`SELECT ${pair('diary_reaction', 'created_at')}`, [days]),
+    query('SELECT reaction, count(*) AS n FROM diary_reaction GROUP BY 1'),
+    query(
+      `WITH a AS (${daily('user_account', 'created_at')}),
+            p AS (${daily('diary_entry', 'published_at', PUB)}),
+            v AS (${daily('diary_entry', 'created_at', PRIV)}),
+            c AS (${daily('comment', 'created_at', `status <> 'deleted'`)}),
+            f AS (${daily('diary_favorite', 'created_at')}),
+            w AS (${daily('blog_follow', 'followed_at')}),
+            r AS (${daily('diary_reaction', 'created_at')})
+       SELECT to_char(d.day, 'YYYY-MM-DD') AS day,
+              COALESCE(a.n, 0) AS accounts, COALESCE(p.n, 0) AS public_entries, COALESCE(v.n, 0) AS private_entries,
+              COALESCE(c.n, 0) AS comments, COALESCE(f.n, 0) AS favorites, COALESCE(w.n, 0) AS follows,
+              COALESCE(r.n, 0) AS reactions
+         FROM generate_series(${TPE_TODAY} - ($1::int - 1), ${TPE_TODAY}, interval '1 day') AS d(day)
+         LEFT JOIN a ON a.day = d.day::date LEFT JOIN p ON p.day = d.day::date LEFT JOIN v ON v.day = d.day::date
+         LEFT JOIN c ON c.day = d.day::date LEFT JOIN f ON f.day = d.day::date LEFT JOIN w ON w.day = d.day::date
+         LEFT JOIN r ON r.day = d.day::date
+        ORDER BY d.day`,
+      [days],
+    ),
+    query(
+      `SELECT (SELECT count(*) FROM user_account WHERE created_at < ${CUR}) AS accounts,
+              (SELECT count(*) FROM diary_entry WHERE status <> 'deleted' AND created_at < ${CUR}) AS entries`,
+      [days],
+    ),
+    query(`SELECT visibility, count(*) AS n FROM diary_entry WHERE status <> 'deleted' GROUP BY 1`),
+    query(`SELECT status, count(*) AS n FROM diary_entry GROUP BY 1`),
+    query(
+      `SELECT s.mood_score, count(e.entry_id) AS n
+         FROM generate_series(1, 5) AS s(mood_score)
+         LEFT JOIN (SELECT e.entry_id, e.mood_score FROM ${JOINED} WHERE ${PUBLIC_READABLE}) e
+           ON e.mood_score = s.mood_score
+        GROUP BY s.mood_score ORDER BY s.mood_score`,
+    ),
+    query(
+      `SELECT COALESCE(c.category_name, '未分類') AS category_name, count(*) AS n
+         FROM ${JOINED}
+         LEFT JOIN category c ON c.blog_id = e.blog_id AND c.category_no = e.category_no
+        WHERE ${PUBLIC_READABLE}
+        GROUP BY 1 ORDER BY n DESC, 1 LIMIT 8`,
+    ),
+    query(
+      `SELECT b.blog_id, b.blog_name, count(*) AS n
+         FROM blog_follow f JOIN blog b ON b.blog_id = f.blog_id JOIN user_account u ON u.user_id = b.user_id
+        WHERE ${BLOG_VISIBLE}
+        GROUP BY b.blog_id, b.blog_name ORDER BY n DESC, b.blog_id LIMIT 8`,
+    ),
+    query(
+      `SELECT b.blog_id, u.nickname, count(*) AS n
+         FROM ${JOINED}
+        WHERE ${PUBLIC_READABLE} AND e.published_at >= ${CUR}
+        GROUP BY b.blog_id, u.nickname ORDER BY n DESC, b.blog_id LIMIT 8`,
+      [days],
+    ),
+    query(
+      `SELECT extract(isodow FROM e.published_at AT TIME ZONE 'Asia/Taipei')::int AS dow,
+              extract(hour FROM e.published_at AT TIME ZONE 'Asia/Taipei')::int AS hour, count(*) AS n
+         FROM ${JOINED}
+        WHERE ${PUBLIC_READABLE} AND e.published_at >= ${CUR}
+        GROUP BY 1, 2`,
+      [days],
+    ),
+  ]);
+  const byKey = (rows, key) => Object.fromEntries(rows.map((r) => [r[key], r.n]));
+  res.json({
+    days,
+    period: {
+      accounts: kAcc.rows[0], public_entries: kEnt.rows[0], comments: kCom.rows[0],
+      favorites: kFav.rows[0], follows: kFol.rows[0], reactions: kRea.rows[0],
+    },
+    daily: series.rows,
+    before: before.rows[0],
+    composition: {
+      visibility: { public: 0, private: 0, ...byKey(visibility.rows, 'visibility') },
+      status: { active: 0, hidden: 0, deleted: 0, ...byKey(status.rows, 'status') },
+      public_mood: mood.rows,
+      public_categories: categories.rows,
+      reactions: { like: 0, hug: 0, cheer: 0, haha: 0, sad: 0, ...byKey(reactionKinds.rows, 'reaction') },
+    },
+    top_followed_blogs: topBlogs.rows,
+    top_authors: topAuthors.rows,
+    publish_heatmap: heat.rows,
   });
 }));
 

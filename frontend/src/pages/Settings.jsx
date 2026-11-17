@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth, useFeedback, useLook } from '../context.jsx';
 import { useData } from '../hooks.js';
 import Icon from '../components/Icon.jsx';
-import { Button, Field } from '../components/ui.jsx';
+import { Avatar, Button, Field, Segmented, SongField } from '../components/ui.jsx';
+import { COVER_PATTERNS, ThemeArt } from '../components/Art.jsx';
+
+const FONTS = [{ value: 'serif', label: '襯線' }, { value: 'sans', label: '黑體' }, { value: 'mono', label: '等寬' }];
 
 export default function Settings() {
   const { user, refresh, isSuspended } = useAuth();
@@ -18,12 +21,19 @@ export default function Settings() {
   const [renameText, setRenameText] = useState('');
   const [pw, setPw] = useState({ current_password: '', new_password: '' });
   const [pwBusy, setPwBusy] = useState(false);
+  const avatarRef = useRef(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [mood, setMood] = useState({ status_text: '', duration: '24h' });
+  const [moodBusy, setMoodBusy] = useState(false);
 
   useEffect(() => {
     if (space.data && !form) {
       setForm({
         nickname: space.data.nickname, blog_name: space.data.blog.blog_name,
         description: space.data.blog.description || '', theme_id: space.data.blog.theme_id,
+        tagline: space.data.blog.tagline || '', cover_pattern: space.data.blog.cover_pattern,
+        title_font: space.data.blog.title_font,
+        song_url: space.data.blog.song_url || '', song_title: space.data.blog.song_title || '',
       });
     }
   }, [space.data, form]);
@@ -62,6 +72,36 @@ export default function Settings() {
   const updateCategory = async (no, body) => {
     try { await api.put(`/me/categories/${no}`, body); setRenaming(null); space.reload(); } catch (err) { fail(err); }
   };
+  const pickAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { fail({ message: '大頭貼大小不可超過 2 MB' }); return; }
+    setAvatarBusy(true);
+    try {
+      const data = new FormData();
+      data.append('avatar', file);
+      await api.put('/me/avatar', data);
+      await refresh();
+      toast('大頭貼已更新');
+    } catch (err) { fail(err); } finally { setAvatarBusy(false); }
+  };
+  const removeAvatar = async () => {
+    try { await api.del('/me/avatar'); await refresh(); toast('已移除大頭貼'); } catch (err) { fail(err); }
+  };
+  const saveMood = async (e) => {
+    e.preventDefault();
+    setMoodBusy(true);
+    try {
+      await api.put('/me/status', mood);
+      await refresh();
+      setMood((m) => ({ ...m, status_text: '' }));
+      toast('已更新現在的心情');
+    } catch (err) { fail(err); } finally { setMoodBusy(false); }
+  };
+  const clearMood = async () => {
+    try { await api.del('/me/status'); await refresh(); toast('已清除'); } catch (err) { fail(err); }
+  };
   const changePassword = async (e) => {
     e.preventDefault();
     setPwBusy(true);
@@ -78,6 +118,38 @@ export default function Settings() {
         <h1 className="title">空間與帳號設定</h1>
       </header>
       {isSuspended && <div className="notice is-danger"><Icon name="info" />帳號已被停權，只能修改密碼。</div>}
+
+      <section className="glass panel is-roomy stack is-loose">
+        <h2 className="heading">大頭貼與現在的心情</h2>
+        <div className="row">
+          <Avatar name={user.nickname} src={user.avatar} size="is-large" />
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="row is-tight">
+              <input ref={avatarRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={pickAvatar} />
+              <Button type="button" busy={avatarBusy} disabled={isSuspended} onClick={() => avatarRef.current.click()}>
+                <Icon name="image" size={17} />{user.avatar ? '更換大頭貼' : '上傳大頭貼'}
+              </Button>
+              {user.avatar && <Button type="button" className="is-quiet is-danger" onClick={removeAvatar}>移除</Button>}
+            </div>
+            <small className="tiny">JPG、PNG 或 WebP，最大 2 MB。沒有上傳時顯示暱稱的第一個字。</small>
+          </div>
+        </div>
+        <form className="stack" onSubmit={saveMood}>
+          <Field label="現在的心情" hint="一句話，會顯示在你的空間與日記旁，到期後自動消失">
+            <input className="input" maxLength={60} required value={mood.status_text} placeholder={user.status_text || '例如：期末週，努力中'}
+              onChange={(e) => setMood({ ...mood, status_text: e.target.value })} />
+          </Field>
+          <div className="row is-between">
+            <Segmented label="顯示時間" value={mood.duration} onChange={(v) => setMood({ ...mood, duration: v })}
+              options={[{ value: '4h', label: '4 小時' }, { value: '24h', label: '1 天' }, { value: '7d', label: '7 天' }]} />
+            <div className="row is-tight">
+              {user.status_text && <Button type="button" className="is-quiet" onClick={clearMood}>清除目前的心情</Button>}
+              <Button type="submit" busy={moodBusy} disabled={isSuspended || !mood.status_text.trim()}>更新</Button>
+            </div>
+          </div>
+          {user.status_text && <p className="tiny">目前顯示：<span className="status-chip" style={{ marginLeft: 0 }}>{user.status_text}</span></p>}
+        </form>
+      </section>
 
       <form className="glass theme-tile panel is-roomy stack is-loose" onSubmit={saveSpace}>
         <h2 className="heading">個人空間</h2>
@@ -111,6 +183,32 @@ export default function Settings() {
             ))}
           </div>
         </div>
+        <Field label="簽名" hint="顯示在空間名稱下方的一句話，最多 60 字">
+          <input className="input" maxLength={60} value={form.tagline} placeholder="例如：慢慢來，比較快。" onChange={(e) => setForm({ ...form, tagline: e.target.value })} />
+        </Field>
+        <div className="field">
+          <span>封面圖案</span>
+          <div className="swatches" role="radiogroup" aria-label="封面圖案">
+            {COVER_PATTERNS.map((p) => (
+              <button key={p.value} type="button" role="radio" aria-checked={form.cover_pattern === p.value}
+                className={`swatch is-cover ${form.cover_pattern === p.value ? 'is-active' : ''}`} onClick={() => setForm({ ...form, cover_pattern: p.value })}>
+                <i><ThemeArt pattern={p.value} /></i>{p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="field">
+          <span>標題字體</span>
+          <div className="swatches" role="radiogroup" aria-label="標題字體">
+            {FONTS.map((f) => (
+              <button key={f.value} type="button" role="radio" aria-checked={form.title_font === f.value}
+                className={`swatch is-font ${form.title_font === f.value ? 'is-active' : ''}`} onClick={() => setForm({ ...form, title_font: f.value })}>
+                <b className="title" data-font={f.value}>日記 Aa</b>{f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <SongField label="代表歌曲" value={{ song_url: form.song_url, song_title: form.song_title }} onChange={(v) => setForm((f) => ({ ...f, ...v }))} />
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <Button className="is-primary" type="submit" busy={busy} disabled={isSuspended}>儲存空間設定</Button>
         </div>

@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "db:init": "node scripts/db.js init",
+    "db:migrate": "node scripts/db.js migrate",
     "db:reset": "node scripts/db.js reset",
     "db:seed": "node scripts/seed.js",
     "test": "node --test test/*.test.js"

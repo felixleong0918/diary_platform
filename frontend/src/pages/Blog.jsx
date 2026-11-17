@@ -1,18 +1,19 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, qs } from '../api.js';
 import { useAuth, useFeedback, usePageStyle } from '../context.jsx';
 import { useData, usePaged } from '../hooks.js';
 import Icon from '../components/Icon.jsx';
 import Messages from '../components/Messages.jsx';
-import { Avatar, Button, Empty, EntryCard, Field, LoadMore, Segmented, Skeletons } from '../components/ui.jsx';
+import { Avatar, Button, Empty, EntryCard, Field, LoadMore, Segmented, Skeletons, SongLink } from '../components/ui.jsx';
 import { ThemeArt } from '../components/Art.jsx';
 
 export default function Blog() {
   const { blogId } = useParams();
   const { user, isSuspended } = useAuth();
   const { fail, toast } = useFeedback();
-  const [tab, setTab] = useState('entries');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(params.get('tab') === 'guestbook' ? 'guestbook' : 'entries');
   const [filter, setFilter] = useState({ category_no: '', from: '', to: '' });
   const [followBusy, setFollowBusy] = useState(false);
 
@@ -57,15 +58,18 @@ export default function Blog() {
   return (
     <main className="page stack is-loose">
       <header className="glass theme-tile panel is-roomy stack center" style={{ padding: '56px 24px 48px', gap: 12 }}>
-        <ThemeArt />
+        <ThemeArt pattern={b.cover_pattern} />
         {b.is_owner && b.status !== 'active' && (
           <div className="notice is-danger"><Icon name="eyeoff" />這個空間已被營運者隱藏。</div>
         )}
         <div className="stack center" style={{ position: 'relative', gap: 12 }}>
-        <Avatar name={b.owner_nickname} size="is-large" />
-        <h1 className="title">{b.blog_name}</h1>
+        <Avatar name={b.owner_nickname} src={b.owner_avatar} size="is-large" />
+        {b.owner_status_text && <p className="status-bubble">{b.owner_status_text}</p>}
+        <h1 className="title" data-font={b.title_font}>{b.blog_name}</h1>
+        {b.tagline && <p className="tagline">{b.tagline}</p>}
         <p className="lede" style={{ fontSize: 18 }}>{b.owner_nickname} · @{b.owner_username}</p>
         {b.description && <p className="muted prewrap" style={{ maxWidth: 560 }}>{b.description}</p>}
+        <SongLink title={b.song_title} url={b.song_url} className="is-on-tint" />
         <p className="tiny num">{b.public_entry_count} 篇公開日記 · {b.follower_count} 人追蹤 · 主題「{b.theme_name}」</p>
         <div className="row" style={{ marginTop: 8, justifyContent: 'center' }}>
           {b.is_owner ? (

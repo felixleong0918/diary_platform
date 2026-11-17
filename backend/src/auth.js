@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { avatarSql, statusSql } from './people.js';
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { query } from './db.js';
@@ -24,6 +25,8 @@ export function clearSession(res) {
 export async function loadUser(userId) {
   const { rows } = await query(
     `SELECT u.user_id, u.username, u.email, u.nickname, u.status, u.created_at,
+            ${avatarSql('u')} AS avatar, ${statusSql('u')} AS status_text,
+            CASE WHEN u.status_expires_at > now() THEN u.status_expires_at END AS status_expires_at,
             b.blog_id,
             ARRAY(SELECT role FROM user_role r WHERE r.user_id = u.user_id ORDER BY role) AS roles
        FROM user_account u

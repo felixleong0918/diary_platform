@@ -4,7 +4,9 @@ import { wrap, badRequest, unavailable, notFound, conflict } from '../errors.js'
 import { requireLogin, requireActive } from '../auth.js';
 import { BLOG_VISIBLE, PUBLIC_READABLE } from '../access.js';
 import { ENTRY_CARD, ENTRY_FROM } from '../entrySql.js';
-import { text, int, id, date, oneOf, paging } from '../validate.js';
+import { text, int, id, date, oneOf, paging, song } from '../validate.js';
+import { lookupSong } from '../songInfo.js';
+import { avatarSql, statusSql } from '../people.js';
 import { logEvent } from '../mongo.js';
 
 const router = Router();
@@ -22,6 +24,17 @@ router.get('/tags', wrap(async (_req, res) => {
     `SELECT tag_id, tag_name FROM tag WHERE status = 'active' ORDER BY tag_name`,
   );
   res.json({ tags: rows });
+}));
+
+// 自訂標籤：名稱標準化（去空白、轉小寫）後唯一；已存在就直接沿用，被營運者停用的不能再選
+router.post('/tags', requireActive, wrap(async (req, res) => {
+  const name = text(req.body.tag_name, '標籤名稱', { max: 30 }).replace(/^#+/, '').trim().toLowerCase();
+  if (!name) throw badRequest('請填寫標籤名稱');
+  if (/\s/.test(name)) throw badRequest('標籤名稱不能包含空白');
+  await query('INSERT INTO tag (tag_name) VALUES ($1) ON CONFLICT (tag_name) DO NOTHING', [name]);
+  const { rows } = await query('SELECT tag_id, tag_name, status FROM tag WHERE tag_name = $1', [name]);
+  if (rows[0].status !== 'active') throw conflict('retired', '這個標籤已被停用，不能新選');
+  res.status(201).json({ tag: { tag_id: rows[0].tag_id, tag_name: rows[0].tag_name } });
 }));
 
 // 公開標籤熱度：只計算他人可讀的日記
@@ -44,7 +57,9 @@ router.get('/tags/popular', wrap(async (_req, res) => {
 // ---- 公開空間 -----------------------------------------------------------
 const BLOG_CARD = `
   b.blog_id, b.blog_name, b.description, b.status, b.created_at,
+  b.tagline, b.cover_pattern, b.title_font, b.song_title, b.song_url,
   u.user_id AS owner_id, u.nickname AS owner_nickname, u.username AS owner_username,
+  ${avatarSql('u')} AS owner_avatar, ${statusSql('u')} AS owner_status_text,
   th.style_key, th.theme_name,
   (SELECT count(*) FROM blog_follow bf WHERE bf.blog_id = b.blog_id) AS follower_count,
   (SELECT count(*) FROM diary_entry e
@@ -125,10 +140,17 @@ router.get('/blogs/:blogId/entries', wrap(async (req, res) => {
   res.json({ entries: rows.slice(0, size), page, has_more: rows.length > size });
 }));
 
+// 由歌曲連結查歌名（YouTube、Spotify）；查不到時前端請使用者自行輸入
+router.get('/song-info', requireLogin, wrap(async (req, res) => {
+  const url = text(req.query.url, '歌曲連結', { max: 500 });
+  res.json(await lookupSong(url));
+}));
+
 // ---- 管理個人空間 -------------------------------------------------------
 router.get('/me/space', requireLogin, wrap(async (req, res) => {
   const { rows } = await query(
     `SELECT b.blog_id, b.blog_name, b.description, b.status, b.theme_id, th.style_key, th.theme_name,
+            b.tagline, b.cover_pattern, b.title_font, b.song_title, b.song_url,
             th.status AS theme_status
        FROM blog b JOIN theme th ON th.theme_id = b.theme_id
       WHERE b.user_id = $1`,
@@ -149,6 +171,10 @@ router.put('/me/space', requireActive, wrap(async (req, res) => {
   const blogName = text(req.body.blog_name, '空間名稱', { max: 100 });
   const description = text(req.body.description, '簡介', { max: 1000, optional: true });
   const themeId = id(req.body.theme_id, '主題', 'H');
+  const tagline = text(req.body.tagline, '簽名', { max: 60, optional: true });
+  const cover = oneOf(req.body.cover_pattern ?? 'shapes', '封面圖案', ['shapes', 'waves', 'grid', 'dots']);
+  const font = oneOf(req.body.title_font ?? 'serif', '標題字體', ['serif', 'sans', 'mono']);
+  const music = song(req.body);
   await tx(async (client) => {
     const blog = await client.query('SELECT theme_id FROM blog WHERE user_id = $1 FOR UPDATE', [req.user.user_id]);
     if (blog.rows[0].theme_id !== themeId) {
@@ -159,8 +185,9 @@ router.put('/me/space', requireActive, wrap(async (req, res) => {
     }
     await client.query('UPDATE user_account SET nickname = $1 WHERE user_id = $2', [nickname, req.user.user_id]);
     await client.query(
-      'UPDATE blog SET blog_name = $1, description = $2, theme_id = $3 WHERE user_id = $4',
-      [blogName, description, themeId, req.user.user_id],
+      `UPDATE blog SET blog_name = $1, description = $2, theme_id = $3, tagline = $5, cover_pattern = $6,
+              title_font = $7, song_title = $8, song_url = $9 WHERE user_id = $4`,
+      [blogName, description, themeId, req.user.user_id, tagline, cover, font, music.song_title, music.song_url],
     );
   });
   res.json({ ok: true });

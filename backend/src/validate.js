@@ -61,3 +61,16 @@ export function paging(req, defaultSize = 12, maxSize = 50) {
   const size = Math.min(maxSize, Math.max(1, parseInt(req.query.size, 10) || defaultSize));
   return { page, size, limit: size, offset: (page - 1) * size };
 }
+
+/** 歌曲：連結與歌名須同時填寫或同時留空；連結只接受 https。 */
+export function song(body) {
+  const url = text(body.song_url, '歌曲連結', { max: 500, optional: true });
+  const title = text(body.song_title, '歌名', { max: 120, optional: true });
+  if (!url && !title) return { song_title: null, song_url: null };
+  if (!url) throw badRequest('請貼上歌曲連結');
+  let parsed;
+  try { parsed = new URL(url); } catch { throw badRequest('歌曲連結格式不正確'); }
+  if (parsed.protocol !== 'https:') throw badRequest('歌曲連結必須以 https:// 開頭');
+  if (!title) throw badRequest('請填寫歌名');
+  return { song_title: title, song_url: parsed.href };
+}

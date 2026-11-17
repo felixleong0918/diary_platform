@@ -4,6 +4,7 @@ import { api } from './api.js';
 // ---------- 登入狀態 ----------
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
+export const useUnread = () => { const { unread, refreshUnread, clearUnread } = useContext(AuthContext); return { unread, refreshUnread, clearUnread }; };
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(undefined); // undefined = 尚未確認
@@ -19,7 +20,17 @@ export function AuthProvider({ children }) {
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
 
+  // 未讀通知數：登入後與每次換頁時更新
+  const [unread, setUnread] = useState(0);
+  const userId = user?.user_id;
+  const refreshUnread = useCallback(async () => {
+    if (!userId) { setUnread(0); return; }
+    try { setUnread((await api.get('/me/notifications/unread-count')).unread_count); } catch { /* 下次換頁再試 */ }
+  }, [userId]);
+  useEffect(() => { refreshUnread(); }, [refreshUnread]);
+
   const value = useMemo(() => ({
+    unread, refreshUnread, clearUnread: () => setUnread(0),
     user,
     ready: user !== undefined,
     isOperator: !!user?.roles?.includes('Operator'),
@@ -28,7 +39,7 @@ export function AuthProvider({ children }) {
     login: async (username, password) => setUser((await api.post('/auth/login', { username, password })).user),
     register: async (form) => setUser((await api.post('/auth/register', form)).user),
     logout: async () => { await api.post('/auth/logout'); setUser(null); },
-  }), [user, refresh]);
+  }), [user, refresh, unread, refreshUnread]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

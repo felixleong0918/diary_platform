@@ -96,9 +96,9 @@ export function EmptyArt() {
 }
 
 /** 空間頁首的背景圖樣：顏色跟著主題（currentColor = --tint-2）。 */
-export function ThemeArt() {
-  return (
-    <svg className="theme-art" viewBox="0 0 1080 340" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+const COVER = {
+  shapes: (
+    <>
       <circle cx="70" cy="300" r="150" fill="currentColor" opacity="0.55" />
       <rect x="150" y="36" width="64" height="64" rx="8" fill="currentColor" opacity="0.35" transform="rotate(18 182 68)" />
       <path d="M1080 0v170a170 170 0 0 1-170-170z" fill="currentColor" opacity="0.55" />
@@ -109,6 +109,47 @@ export function ThemeArt() {
         ))}
       </g>
       <path d="M250 300c50-40 110-40 160 0" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" opacity="0.5" />
+    </>
+  ),
+  waves: (
+    <g fill="none" stroke="currentColor" strokeLinecap="round">
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <path key={i} strokeWidth={i % 2 ? 5 : 10} opacity={0.3 + i * 0.07}
+          d={`M-20 ${150 + i * 38} C 160 ${90 + i * 38}, 340 ${210 + i * 38}, 540 ${150 + i * 38} S 920 ${90 + i * 38}, 1100 ${150 + i * 38}`} />
+      ))}
+    </g>
+  ),
+  grid: (
+    <>
+      <g stroke="currentColor" strokeWidth="2" opacity="0.38">
+        {Array.from({ length: 19 }, (_, i) => <path key={`v${i}`} d={`M${i * 60} 0V340`} />)}
+        {Array.from({ length: 6 }, (_, i) => <path key={`h${i}`} d={`M0 ${20 + i * 60}H1080`} />)}
+      </g>
+      <g fill="currentColor" opacity="0.5">
+        <rect x="60" y="200" width="120" height="120" /><rect x="900" y="20" width="60" height="120" />
+        <rect x="960" y="140" width="60" height="60" /><rect x="180" y="20" width="60" height="60" />
+      </g>
+    </>
+  ),
+  dots: (
+    <g fill="currentColor">
+      {Array.from({ length: 9 * 28 }, (_, i) => {
+        const cx = 20 + (i % 28) * 40; const cy = 18 + Math.floor(i / 28) * 40;
+        const edge = Math.abs(cx - 540) / 540;                 // 中央留白，兩側較大
+        return <circle key={i} cx={cx} cy={cy} r={1.5 + edge * 9} opacity={0.25 + edge * 0.4} />;
+      })}
+    </g>
+  ),
+};
+export const COVER_PATTERNS = [
+  { value: 'shapes', label: '幾何' }, { value: 'waves', label: '波浪' },
+  { value: 'grid', label: '方格' }, { value: 'dots', label: '圓點' },
+];
+
+export function ThemeArt({ pattern = 'shapes' }) {
+  return (
+    <svg className="theme-art" viewBox="0 0 1080 340" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      {COVER[pattern] || COVER.shapes}
     </svg>
   );
 }

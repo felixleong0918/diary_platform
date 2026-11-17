@@ -7,8 +7,9 @@ import { wrap, badRequest, unavailable, conflict } from '../errors.js';
 import { requireLogin, requireActive } from '../auth.js';
 import { PUBLIC_READABLE, canRead, isPublicReadable } from '../access.js';
 import { ENTRY_CARD, ENTRY_FROM } from '../entrySql.js';
-import { text, int, id, date, oneOf, paging } from '../validate.js';
+import { text, int, id, date, oneOf, paging, song } from '../validate.js';
 import { logEvent } from '../mongo.js';
+import { avatarSql, statusSql } from '../people.js';
 
 const router = Router();
 const like = (s) => `%${s.replace(/[\\%_]/g, '\\$&')}%`;
@@ -54,7 +55,8 @@ async function loadContext(entryId) {
     `SELECT e.*, e.status AS entry_status, b.status AS blog_status, b.blog_name,
             b.user_id AS owner_id, u.status AS owner_status,
             u.nickname AS author_nickname, u.username AS author_username,
-            c.category_name, th.style_key
+            ${avatarSql('u')} AS author_avatar, ${statusSql('u')} AS author_status_text,
+            c.category_name, th.style_key, b.title_font
        FROM diary_entry e
        JOIN blog b ON b.blog_id = e.blog_id
        JOIN user_account u ON u.user_id = b.user_id
@@ -89,15 +91,20 @@ router.get('/entries/:entryId', wrap(async (req, res) => {
     blog_id: ctx.blog_id,
     blog_name: ctx.blog_name,
     style_key: ctx.style_key,
+    title_font: ctx.title_font,
     author_id: ctx.owner_id,
     author_nickname: ctx.author_nickname,
     author_username: ctx.author_username,
+    author_avatar: ctx.author_avatar,
+    author_status_text: ctx.author_status_text,
     category_no: ctx.category_no,
     category_name: ctx.category_name,
     entry_date: ctx.entry_date,
     title: ctx.title,
     content: ctx.content,
     has_photo: ctx.photo_url !== null,
+    song_title: ctx.song_title,
+    song_url: ctx.song_url,
     visibility: ctx.visibility,
     status: ctx.entry_status,
     published_at: ctx.published_at,
@@ -134,6 +141,7 @@ function readEntryBody(body) {
     category_no: int(body.category_no, '分類', { min: 1, optional: true }),
     visibility: oneOf(body.visibility ?? 'private', '可見度', ['public', 'private']),
     tag_ids: tagIds,
+    ...song(body),
   };
 }
 
@@ -165,10 +173,12 @@ router.post('/entries', requireActive, wrap(async (req, res) => {
     if (data.category_no) await assertCategoryActive(client, blogId, data.category_no);
     await assertTagsActive(client, data.tag_ids);
     const { rows } = await client.query(
-      `INSERT INTO diary_entry (blog_id, category_no, entry_date, title, content, mood_score, visibility, published_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::varchar, CASE WHEN $7::varchar = 'public' THEN now() END)
+      `INSERT INTO diary_entry (blog_id, category_no, entry_date, title, content, mood_score, visibility, published_at,
+                                song_title, song_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::varchar, CASE WHEN $7::varchar = 'public' THEN now() END, $8, $9)
        RETURNING entry_id, version`,
-      [blogId, data.category_no, data.entry_date, data.title, data.content, data.mood_score, data.visibility],
+      [blogId, data.category_no, data.entry_date, data.title, data.content, data.mood_score, data.visibility,
+        data.song_title, data.song_url],
     );
     if (data.tag_ids.length) {
       await client.query(
@@ -212,11 +222,12 @@ router.put('/entries/:entryId', requireActive, wrap(async (req, res) => {
       `UPDATE diary_entry
           SET category_no = $3, entry_date = $4, title = $5, content = $6, mood_score = $7,
               visibility = $8, published_at = CASE WHEN $9::boolean THEN now() ELSE published_at END,
+              song_title = $10, song_url = $11,
               updated_at = now(), version = version + 1
         WHERE entry_id = $1 AND version = $2
         RETURNING entry_id, version`,
       [entryId, version, data.category_no, data.entry_date, data.title, data.content,
-        data.mood_score, data.visibility, becamePublic],
+        data.mood_score, data.visibility, becamePublic, data.song_title, data.song_url],
     );
     if (!rows[0]) throw conflict('version_conflict', '這篇日記已在別處被修改，請重新載入後再編輯');
     await client.query('DELETE FROM diary_tag WHERE entry_id = $1 AND tag_id <> ALL($2::char(9)[])', [

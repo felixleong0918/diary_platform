@@ -15,6 +15,9 @@ const publicUser = (u) => ({
   status: u.status,
   roles: u.roles,
   blog_id: u.blog_id,
+  avatar: u.avatar,
+  status_text: u.status_text,
+  status_expires_at: u.status_expires_at,
 });
 
 function password(value, name = '密碼') {

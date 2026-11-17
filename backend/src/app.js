@@ -10,6 +10,7 @@ import blogRoutes from './routes/blogs.js';
 import entryRoutes from './routes/entries.js';
 import socialRoutes from './routes/social.js';
 import operatorRoutes from './routes/operator.js';
+import profileRoutes from './routes/profile.js';
 
 export function createApp() {
   const app = express();
@@ -26,6 +27,7 @@ export function createApp() {
   api.use(blogRoutes);
   api.use(entryRoutes);
   api.use(socialRoutes);
+  api.use(profileRoutes);
   api.use((_req, _res, next) => next(notFound('找不到這個 API')));
   app.use('/api', api);
 

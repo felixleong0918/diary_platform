@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth, useFeedback, useLook } from '../context.jsx';
+import { useAuth, useFeedback, useLook, useUnread } from '../context.jsx';
 import Icon from './Icon.jsx';
 import { Avatar, useSlidingPill } from './ui.jsx';
 
@@ -12,6 +12,8 @@ export default function NavBar() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+  const { unread, refreshUnread } = useUnread();
+  useEffect(() => { refreshUnread(); }, [pathname, refreshUnread]);
 
   const tabs = [
     { to: '/', label: '探索', icon: 'compass', end: true },
@@ -52,7 +54,7 @@ export default function NavBar() {
         ))}
       </nav>
     <header className="nav">
-      <Link to="/" className="nav-brand">日記平台</Link>
+      <Link to="/" className="nav-brand">LittleTreeHollow°</Link>
       <div className="nav-actions">
         <button
           className="btn is-quiet is-icon" onClick={toggleScheme}
@@ -68,17 +70,21 @@ export default function NavBar() {
         )}
         {user && (
           <>
+            <Link to="/notifications" className="btn is-quiet is-icon nav-bell" aria-label={unread ? `通知，${unread} 則未讀` : '通知'}>
+              <Icon name="bell" />
+              {unread > 0 && <b className="num">{unread > 99 ? '99+' : unread}</b>}
+            </Link>
             <Link to="/write" className="btn is-quiet" aria-label="寫日記">
               <Icon name="pen" size={17} /><span className="btn-label">寫日記</span>
             </Link>
             <div className="menu" ref={menuRef}>
-              <button className="btn is-icon" aria-haspopup="menu" aria-expanded={open} aria-label="帳號選單" onClick={() => setOpen((o) => !o)}>
-                {[...user.nickname][0]}
+              <button className="btn is-icon nav-me" aria-haspopup="menu" aria-expanded={open} aria-label="帳號選單" onClick={() => setOpen((o) => !o)}>
+                {user.avatar ? <Avatar name={user.nickname} src={user.avatar} /> : [...user.nickname][0]}
               </button>
               {open && (
                 <div className="menu-sheet" role="menu">
                   <div className="row" style={{ padding: '8px 12px 12px', flexWrap: 'nowrap' }}>
-                    <Avatar name={user.nickname} />
+                    <Avatar name={user.nickname} src={user.avatar} />
                     <div className="grow">
                       <div style={{ fontWeight: 650 }}>{user.nickname}</div>
                       <div className="tiny muted">@{user.username}</div>

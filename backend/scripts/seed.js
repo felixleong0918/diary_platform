@@ -20,8 +20,8 @@ const args = Object.fromEntries(
 );
 
 const PRESETS = {
-  demo: { users: 40, entries: 600, comments: 1200, favorites: 800, follows: 200, tagPairs: 1200, guestbook: 120, events: 600 },
-  full: { users: 2000, entries: 30000, comments: 60000, favorites: 40000, follows: 10000, tagPairs: 60000, guestbook: 6000, events: 20000 },
+  demo: { users: 40, entries: 600, comments: 1200, favorites: 800, follows: 200, tagPairs: 1200, guestbook: 120, events: 600, reactions: 1000 },
+  full: { users: 2000, entries: 30000, comments: 60000, favorites: 40000, follows: 10000, tagPairs: 60000, guestbook: 6000, events: 20000, reactions: 50000 },
 };
 const scale = args.scale || 'demo';
 if (!PRESETS[scale]) {
@@ -36,7 +36,7 @@ if (args.users) {
 }
 for (const [flag, key] of [['users', 'users'], ['entries', 'entries'], ['comments', 'comments'],
   ['favorites', 'favorites'], ['follows', 'follows'], ['tag-pairs', 'tagPairs'],
-  ['guestbook', 'guestbook'], ['events', 'events']]) {
+  ['guestbook', 'guestbook'], ['events', 'events'], ['reactions', 'reactions']]) {
   if (args[flag] !== undefined) {
     const n = Number(args[flag]);
     if (!Number.isInteger(n) || n < 0) { console.error(`--${flag} 必須是非負整數`); process.exit(1); }
@@ -99,6 +99,12 @@ const COMMENTS = ['讀完覺得很有共鳴。', '謝謝分享，今天也辛苦
   '期待下一篇。', '原來大家都一樣，安心了一點。', '這個標題取得很好。'];
 const GUESTBOOK = ['路過留個言，很喜歡這裡的文字。', '追蹤了，期待更多紀錄。', '版面很舒服，會常來看看。',
   '同校的來打聲招呼。', '謝謝你把這些日常寫下來。', '偶然看到這個空間，讀了好幾篇。'];
+const TAGLINES = ['慢慢來，比較快。', '把今天過好。', '記得抬頭看天空。', '喜歡下雨天的人。', '還在路上。',
+  '多喝水，早點睡。', '日子是一頁一頁寫出來的。', '今天也辛苦了。'];
+const COVERS = ['shapes', 'waves', 'grid', 'dots'];
+const FONTS = ['serif', 'serif', 'sans', 'mono'];
+const REPLIES = ['真的，我也這麼覺得。', '謝謝你的留言！', '下次一起去。', '哈哈被你發現了。', '同意，尤其是最後那段。', '我也想試試看。'];
+const REACTION_KINDS = ['like', 'like', 'like', 'like', 'hug', 'hug', 'cheer', 'cheer', 'haha', 'sad'];
 const SEARCH_WORDS = ['散步', '咖啡', '圖書館', '週末', '旅行', '晚餐', '期中', '早晨', '下雨', '球場'];
 
 // ---- 批次寫入 -----------------------------------------------------------
@@ -119,6 +125,21 @@ async function bulk(client, table, columns, types, rows, label) {
 const now = Date.now();
 const DAY = 86400000;
 const iso = (ms) => new Date(Math.min(ms, now)).toISOString();
+const HOUR = 3600000;
+// 台北時間各小時的發文比重：清晨最少，晚間最多
+const HOUR_WEIGHT = [3, 2, 1, 1, 1, 1, 2, 4, 5, 4, 4, 5, 7, 6, 5, 5, 6, 7, 9, 11, 14, 16, 13, 7];
+const HOUR_TOTAL = HOUR_WEIGHT.reduce((a, b) => a + b, 0);
+const pickHour = () => {
+  let r = rand() * HOUR_TOTAL;
+  for (let h = 0; h < 24; h++) { r -= HOUR_WEIGHT[h]; if (r < 0) return h; }
+  return 23;
+};
+// 台北時間今天 00:00（UTC+8，無日光節約時間）
+const todayTpe = Math.floor((now + 8 * HOUR) / DAY) * DAY - 8 * HOUR;
+// 在 from 之後、現在之前的隨機時間
+const after = (from) => from + rand() * Math.max(HOUR, now - from);
+// 互動多半發生在公開後幾天內：指數衰減的延遲，但不超過現在
+const soonAfter = (from) => from + Math.min(-Math.log(1 - rand()) * 4 * DAY, rand() * Math.max(HOUR, now - from));
 
 async function main() {
   const existing = await pool.query('SELECT count(*) AS n FROM user_account');
@@ -137,6 +158,8 @@ async function main() {
   const users = [], roles = [], blogs = [], categories = [];
   const blogCats = [];               // 各空間的分類編號
   const userState = [];              // { active, blogActive }
+  const joined = [];                 // 各帳號的註冊時間
+  const usernames = [];
   for (let i = 1; i <= N.users; i++) {
     const uid = pad('U', i), bid = pad('B', i);
     let username, nickname, status = 'active', blogStatus = 'active';
@@ -150,12 +173,16 @@ async function main() {
       else if (r < 0.02) status = 'deactivated';
       else if (r < 0.03) blogStatus = 'hidden';
     }
-    const created = now - randInt(200, 700) * DAY;
+    // 註冊時間由 700 天前一路分布到最近，愈近期愈多；示範帳號固定為最早
+    const created = i <= 2 ? now - 700 * DAY : now - Math.floor(700 * (1 - Math.sqrt(rand()))) * DAY - randInt(1, 23) * HOUR;
+    joined.push(created);
+    usernames.push(username);
     users.push([uid, username, `${username}@example.com`, hash, nickname, status, iso(created)]);
     roles.push([uid, 'User']);
     if (i === 1) roles.push([uid, 'Operator']);
     blogs.push([bid, uid, pad('H', randInt(1, THEMES.length)), nickname + pick(BLOG_SUFFIX),
-      rand() < 0.8 ? pick(SENTENCES) : null, blogStatus, iso(created)]);
+      rand() < 0.8 ? pick(SENTENCES) : null, blogStatus, iso(created),
+      rand() < 0.5 ? pick(TAGLINES) : null, pick(COVERS), pick(FONTS)]);
     const count = randInt(2, 5);
     const names = [...CATEGORIES].sort(() => rand() - 0.5).slice(0, count);
     names.forEach((name, k) => categories.push([bid, k + 1, name, k === count - 1 && rand() < 0.15 ? 'retired' : 'active']));
@@ -167,13 +194,18 @@ async function main() {
   const entries = [];
   const readable = [];               // 他人可讀的日記：[entryIndex, publishedMs, ownerIndex]
   for (let i = 1; i <= N.entries; i++) {
-    const owner = i <= 30 && N.users >= 2 ? 1 : skewed(N.users);   // 前 30 篇給 demo 帳號
-    const dayAgo = Math.floor(540 * rand() ** 1.6);
-    const createdMs = now - dayAgo * DAY - randInt(0, 12) * 3600000;
+    let owner = i <= 30 && N.users >= 2 ? 1 : skewed(N.users);   // 前 30 篇給 demo 帳號
+    const dayAgo = Math.floor(540 * (1 - Math.sqrt(rand())));   // 發文量隨時間線性成長
+    // 依台北時間的時段比重決定發文時刻；不早於作者的註冊時間
+    let createdMs = todayTpe - dayAgo * DAY + pickHour() * HOUR + randInt(0, 3599) * 1000;
+    if (createdMs > now) createdMs -= DAY;
+    // 作者須在發文前已註冊：先改挑其他作者，仍找不到才把時間移到註冊之後
+    for (let tries = 0; i > 30 && createdMs < joined[owner] && tries < 12; tries++) owner = skewed(N.users);
+    if (createdMs < joined[owner]) createdMs = after(joined[owner]);
     const isPublic = rand() < 0.55;
     const r = rand();
     const status = r < 0.01 && isPublic ? 'hidden' : r < 0.03 ? 'deleted' : 'active';
-    const publishedMs = isPublic ? createdMs + randInt(0, 3) * 3600000 : null;
+    const publishedMs = isPublic ? Math.min(now, createdMs + randInt(0, 40) * 60000) : null;
     const body = Array.from({ length: randInt(2, 6) }, () => pick(SENTENCES)).join(rand() < 0.4 ? '\n\n' : '');
     entries.push([
       pad('E', i), pad('B', owner + 1),
@@ -190,6 +222,13 @@ async function main() {
   const activeUsers = userState.map((s, i) => (s.active ? i : -1)).filter((i) => i >= 0);
   const okBlogs = userState.map((s, i) => (s.ok ? i : -1)).filter((i) => i >= 0);
 
+  // 互動者盡量挑在該時間點之前已註冊的帳號
+  const earlyUser = (ms) => {
+    let u = pick(activeUsers);
+    for (let tries = 0; joined[u] > ms && tries < 12; tries++) u = pick(activeUsers);
+    return u;
+  };
+
   // 標籤配對（每篇日記的標籤不重複）
   const tagPairs = new Set();
   const maxPairs = Math.min(N.tagPairs, N.entries * 6);
@@ -199,18 +238,31 @@ async function main() {
 
   // 留言：只針對產生當時他人可讀的日記，時間在公開之後
   const comments = [];
+  const threads = new Map();         // 日記 → 可被回覆的最上層留言
   for (let i = 1; readable.length && i <= N.comments; i++) {
     const [e, published] = readable[skewed(readable.length)];
-    const at = iso(published + rand() * Math.max(3600000, now - published));
-    comments.push([pad('C', i), pad('E', e), pad('U', pick(activeUsers) + 1), pick(COMMENTS),
-      rand() < 0.01 ? 'hidden' : rand() < 0.02 ? 'deleted' : 'visible', at, at]);
+    const who = earlyUser(published);
+    // 約四分之一是回覆：掛在同一篇日記較早的最上層留言底下，時間在它之後
+    const thread = threads.get(e);
+    const parent = thread && rand() < 0.25 ? pick(thread) : null;
+    const base = Math.max(published, joined[who], parent ? parent.ms : 0);
+    const ms = Math.min(now, parent ? base + randInt(60, 86400) * 1000 : soonAfter(base));
+    const status = rand() < 0.01 ? 'hidden' : rand() < 0.02 ? 'deleted' : 'visible';
+    const text = parent && rand() < 0.5 ? `@${usernames[parent.who]} ${pick(REPLIES)}` : parent ? pick(REPLIES) : pick(COMMENTS);
+    comments.push([pad('C', i), pad('E', e), pad('U', who + 1), text, status, iso(ms), iso(ms), parent ? pad('C', parent.i) : null]);
+    if (!parent && status === 'visible') {
+      if (!thread) threads.set(e, []);
+      threads.get(e).push({ i, ms, who });
+    }
   }
 
   // 留言板
   const guestbook = [];
   for (let i = 1; okBlogs.length && i <= N.guestbook; i++) {
-    const at = iso(now - rand() * 180 * DAY);
-    guestbook.push([pad('G', i), pad('B', okBlogs[skewed(okBlogs.length)] + 1), pad('U', pick(activeUsers) + 1),
+    const space = okBlogs[skewed(okBlogs.length)];
+    const who = pick(activeUsers);
+    const at = iso(after(Math.max(now - 180 * DAY, joined[space], joined[who])));
+    guestbook.push([pad('G', i), pad('B', space + 1), pad('U', who + 1),
       pick(GUESTBOOK), rand() < 0.02 ? 'hidden' : 'visible', at, at]);
   }
 
@@ -219,10 +271,21 @@ async function main() {
   const maxFav = Math.min(N.favorites, readable.length * Math.max(1, activeUsers.length - 1));
   for (let guard = 0; favorites.size < maxFav && guard < maxFav * 20; guard++) {
     const [e, published, owner] = readable[skewed(readable.length)];
-    const u = pick(activeUsers);
+    const u = earlyUser(published);
     if (u === owner) continue;
     const key = `${pad('U', u + 1)}|${pad('E', e)}`;
-    if (!favorites.has(key)) favorites.set(key, iso(published + rand() * Math.max(3600000, now - published)));
+    if (!favorites.has(key)) favorites.set(key, iso(soonAfter(Math.max(published, joined[u]))));
+  }
+
+  // 表情回應（每人每篇一種）
+  const reactions = new Map();
+  const maxReact = Math.min(N.reactions, readable.length * Math.max(1, activeUsers.length - 1));
+  for (let guard = 0; reactions.size < maxReact && guard < maxReact * 20; guard++) {
+    const [e, published, owner] = readable[skewed(readable.length)];
+    const u = earlyUser(published);
+    if (u === owner) continue;
+    const key = `${pad('U', u + 1)}|${pad('E', e)}`;
+    if (!reactions.has(key)) reactions.set(key, [pick(REACTION_KINDS), iso(soonAfter(Math.max(published, joined[u])))]);
   }
 
   // 追蹤（不追蹤自己的空間）
@@ -233,7 +296,7 @@ async function main() {
     const u = pick(activeUsers);
     if (u === b) continue;
     const key = `${pad('U', u + 1)}|${pad('B', b + 1)}`;
-    if (!follows.has(key)) follows.set(key, iso(now - rand() * 300 * DAY));
+    if (!follows.has(key)) follows.set(key, iso(after(Math.max(now - 300 * DAY, joined[u], joined[b]))));
   }
 
   const client = await pool.connect();
@@ -244,8 +307,9 @@ async function main() {
     await bulk(client, 'user_account', ['user_id', 'username', 'email', 'password_hash', 'nickname', 'status', 'created_at'],
       ['char(9)', 'text', 'text', 'text', 'text', 'text', 'timestamptz'], users, 'USER_ACCOUNT');
     await bulk(client, 'user_role', ['user_id', 'role'], ['char(9)', 'text'], roles, 'USER_ROLE');
-    await bulk(client, 'blog', ['blog_id', 'user_id', 'theme_id', 'blog_name', 'description', 'status', 'created_at'],
-      ['char(9)', 'char(9)', 'char(9)', 'text', 'text', 'text', 'timestamptz'], blogs, 'BLOG');
+    await bulk(client, 'blog', ['blog_id', 'user_id', 'theme_id', 'blog_name', 'description', 'status', 'created_at',
+      'tagline', 'cover_pattern', 'title_font'],
+      ['char(9)', 'char(9)', 'char(9)', 'text', 'text', 'text', 'timestamptz', 'text', 'text', 'text'], blogs, 'BLOG');
     await bulk(client, 'category', ['blog_id', 'category_no', 'category_name', 'status'],
       ['char(9)', 'int', 'text', 'text'], categories, 'CATEGORY');
     await bulk(client, 'diary_entry',
@@ -255,14 +319,44 @@ async function main() {
         'timestamptz', 'timestamptz', 'timestamptz', 'timestamptz'], entries, 'DIARY_ENTRY');
     await bulk(client, 'diary_tag', ['entry_id', 'tag_id'], ['char(9)', 'char(9)'],
       [...tagPairs].map((k) => k.split('|')), 'DIARY_TAG');
-    await bulk(client, 'comment', ['comment_id', 'entry_id', 'user_id', 'content', 'status', 'created_at', 'updated_at'],
-      ['char(9)', 'char(9)', 'char(9)', 'text', 'text', 'timestamptz', 'timestamptz'], comments, 'COMMENT');
+    await bulk(client, 'comment', ['comment_id', 'entry_id', 'user_id', 'content', 'status', 'created_at', 'updated_at', 'parent_id'],
+      ['char(9)', 'char(9)', 'char(9)', 'text', 'text', 'timestamptz', 'timestamptz', 'char(9)'], comments, 'COMMENT');
     await bulk(client, 'guestbook_entry', ['guestbook_id', 'blog_id', 'user_id', 'content', 'status', 'created_at', 'updated_at'],
       ['char(9)', 'char(9)', 'char(9)', 'text', 'text', 'timestamptz', 'timestamptz'], guestbook, 'GUESTBOOK');
     await bulk(client, 'diary_favorite', ['user_id', 'entry_id', 'created_at'], ['char(9)', 'char(9)', 'timestamptz'],
       [...favorites].map(([k, at]) => [...k.split('|'), at]), 'FAVORITE');
     await bulk(client, 'blog_follow', ['follower_id', 'blog_id', 'followed_at'], ['char(9)', 'char(9)', 'timestamptz'],
       [...follows].map(([k, at]) => [...k.split('|'), at]), 'BLOG_FOLLOW');
+    await bulk(client, 'diary_reaction', ['user_id', 'entry_id', 'reaction', 'created_at'],
+      ['char(9)', 'char(9)', 'text', 'timestamptz'],
+      [...reactions].map(([k, [kind, at]]) => [...k.split('|'), kind, at]), 'REACTION');
+
+    // 通知：由最近 14 天的互動推得，較早的視為已讀
+    const made = await client.query(`
+      INSERT INTO notification (user_id, actor_id, kind, entry_id, comment_id, created_at, read_at)
+      SELECT x.user_id, x.actor_id, x.kind, x.entry_id, x.comment_id, x.at,
+             CASE WHEN x.at < now() - interval '3 days' THEN x.at + interval '6 hours' END
+        FROM (
+          SELECT b.user_id, c.user_id AS actor_id, 'comment' AS kind, c.entry_id, c.comment_id, c.created_at AS at
+            FROM comment c JOIN diary_entry e ON e.entry_id = c.entry_id JOIN blog b ON b.blog_id = e.blog_id
+           WHERE c.parent_id IS NULL AND c.status = 'visible'
+          UNION ALL
+          SELECT p.user_id, c.user_id, 'reply', c.entry_id, c.comment_id, c.created_at
+            FROM comment c JOIN comment p ON p.comment_id = c.parent_id WHERE c.status = 'visible'
+          UNION ALL
+          SELECT b.user_id, f.user_id, 'favorite', f.entry_id, NULL, f.created_at
+            FROM diary_favorite f JOIN diary_entry e ON e.entry_id = f.entry_id JOIN blog b ON b.blog_id = e.blog_id
+          UNION ALL
+          SELECT b.user_id, r.user_id, 'reaction', r.entry_id, NULL, r.created_at
+            FROM diary_reaction r JOIN diary_entry e ON e.entry_id = r.entry_id JOIN blog b ON b.blog_id = e.blog_id
+          UNION ALL
+          SELECT b.user_id, f.follower_id, 'follow', NULL, NULL, f.followed_at
+            FROM blog_follow f JOIN blog b ON b.blog_id = f.blog_id
+        ) x
+       WHERE x.user_id <> x.actor_id AND x.at >= now() - interval '14 days'
+       ORDER BY x.at
+      ON CONFLICT DO NOTHING`);
+    console.log(`  ${'NOTIFICATION'.padEnd(12)} ${made.rowCount.toLocaleString()} 筆`);
 
     // 讓序列接在手動指定的代號之後，之後由 API 新增的資料不會撞號
     for (const [seq, n] of [['user_account_seq', users.length], ['blog_seq', blogs.length],

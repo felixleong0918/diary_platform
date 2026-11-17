@@ -7,6 +7,7 @@ import {
 } from '../access.js';
 import { ENTRY_CARD, ENTRY_FROM } from '../entrySql.js';
 import { text, id, paging } from '../validate.js';
+import { avatarSql, notify, mentionedUsernames } from '../people.js';
 
 const router = Router();
 const messageText = (v) => text(v, '留言內容', { max: 1000 });
@@ -28,8 +29,8 @@ router.get('/entries/:entryId/comments', wrap(async (req, res) => {
   const isEntryOwner = readable.rows[0].owner_id === viewer;
   // 一般讀者只看到 visible；留言者本人另外看得到自己被隱藏的留言
   const { rows } = await query(
-    `SELECT cm.comment_id, cm.content, cm.status, cm.created_at, cm.updated_at,
-            cu.user_id, cu.nickname, cu.username, cb.blog_id AS author_blog_id,
+    `SELECT cm.comment_id, cm.parent_id, cm.content, cm.status, cm.created_at, cm.updated_at,
+            cu.user_id, cu.nickname, cu.username, cb.blog_id AS author_blog_id, ${avatarSql('cu')} AS avatar,
             (cm.user_id = $2) AS is_mine
        FROM comment cm
        JOIN user_account cu ON cu.user_id = cm.user_id
@@ -39,22 +40,64 @@ router.get('/entries/:entryId/comments', wrap(async (req, res) => {
       ORDER BY cm.created_at, cm.comment_id`,
     [entryId, viewer],
   );
-  res.json({ comments: rows.map((c) => ({ ...c, can_remove: c.is_mine || isEntryOwner })) });
+  // 留言裡被 @ 的帳號：回傳對應的空間，前端把它顯示成連結
+  const names = [...new Set(rows.flatMap((c) => mentionedUsernames(c.content)))];
+  const mentions = {};
+  if (names.length) {
+    const found = await query(
+      `SELECT u.username, b.blog_id FROM user_account u JOIN blog b ON b.user_id = u.user_id
+        WHERE u.username = ANY($1) AND ${BLOG_VISIBLE}`,
+      [names],
+    );
+    for (const m of found.rows) mentions[m.username] = m.blog_id;
+  }
+  res.json({ comments: rows.map((c) => ({ ...c, can_remove: c.is_mine || isEntryOwner })), mentions });
 }));
 
 router.post('/entries/:entryId/comments', requireActive, wrap(async (req, res) => {
   const entryId = id(req.params.entryId, '日記代號', 'E');
   const content = messageText(req.body.content);
+  const replyTo = req.body.parent_id ? id(req.body.parent_id, '回覆對象', 'C') : null;
+  const me = req.user.user_id;
   const comment = await tx(async (client) => {
     const ctx = await lockEntryContext(client, entryId, 'SHARE');
     // 只能在有權閱讀的「有效」日記留言；私密日記僅作者本人可留言
-    if (!canRead(ctx, req.user.user_id) || ctx.entry_status !== 'active') throw unavailable();
+    if (!canRead(ctx, me) || ctx.entry_status !== 'active') throw unavailable();
+    // 回覆只有一層：回覆某則回覆時，掛在同一則最上層留言底下
+    let parent = null;
+    if (replyTo) {
+      const found = await client.query(
+        `SELECT comment_id, parent_id, user_id FROM comment
+          WHERE comment_id = $1 AND entry_id = $2 AND status = 'visible' FOR SHARE`,
+        [replyTo, entryId],
+      );
+      if (!found.rows[0]) throw notFound('找不到要回覆的留言');
+      parent = found.rows[0];
+    }
     const { rows } = await client.query(
-      `INSERT INTO comment (entry_id, user_id, content) VALUES ($1, $2, $3)
-       RETURNING comment_id, content, status, created_at, updated_at`,
-      [entryId, req.user.user_id, content],
+      `INSERT INTO comment (entry_id, user_id, content, parent_id) VALUES ($1, $2, $3, $4)
+       RETURNING comment_id, parent_id, content, status, created_at, updated_at`,
+      [entryId, me, content, parent ? parent.parent_id || parent.comment_id : null],
     );
-    return rows[0];
+    const made = rows[0];
+    // 通知：被回覆的人、日記作者、被 @ 的人；同一則留言每人最多一則
+    const notified = new Set([me]);
+    const send = async (userId, kind) => {
+      if (!userId || notified.has(userId)) return;
+      notified.add(userId);
+      await notify(client, { user_id: userId, actor_id: me, kind, entry_id: entryId, comment_id: made.comment_id });
+    };
+    if (parent) await send(parent.user_id, 'reply');
+    await send(ctx.owner_id, 'comment');
+    const names = mentionedUsernames(content);
+    if (names.length && ctx.visibility === 'public') {
+      const users = await client.query(
+        `SELECT user_id FROM user_account WHERE username = ANY($1) AND status = 'active'`,
+        [names],
+      );
+      for (const u of users.rows) await send(u.user_id, 'mention');
+    }
+    return made;
   });
   res.status(201).json({ comment });
 }));
@@ -108,7 +151,7 @@ router.get('/blogs/:blogId/guestbook', wrap(async (req, res) => {
   const isOwner = blog.rows[0].owner_id === viewer;
   const { rows } = await query(
     `SELECT g.guestbook_id, g.content, g.status, g.created_at, g.updated_at,
-            gu.user_id, gu.nickname, gu.username, gb.blog_id AS author_blog_id,
+            gu.user_id, gu.nickname, gu.username, gb.blog_id AS author_blog_id, ${avatarSql('gu')} AS avatar,
             (g.user_id = $2) AS is_mine
        FROM guestbook_entry g
        JOIN user_account gu ON gu.user_id = g.user_id
@@ -137,6 +180,7 @@ router.post('/blogs/:blogId/guestbook', requireActive, wrap(async (req, res) => 
        RETURNING guestbook_id, content, status, created_at, updated_at`,
       [blogId, req.user.user_id, content],
     );
+    await notify(client, { user_id: ctx.owner_id, actor_id: req.user.user_id, kind: 'guestbook' });
     return rows[0];
   });
   res.status(201).json({ message });
@@ -185,6 +229,7 @@ router.post('/blogs/:blogId/follow', requireActive, wrap(async (req, res) => {
        ON CONFLICT (follower_id, blog_id) DO NOTHING`,
       [req.user.user_id, blogId],
     );
+    await notify(client, { user_id: ctx.owner_id, actor_id: req.user.user_id, kind: 'follow' });
   });
   res.json({ is_following: true });
 }));
@@ -243,6 +288,7 @@ router.post('/entries/:entryId/favorite', requireActive, wrap(async (req, res) =
        ON CONFLICT (user_id, entry_id) DO NOTHING`,
       [req.user.user_id, entryId],
     );
+    await notify(client, { user_id: ctx.owner_id, actor_id: req.user.user_id, kind: 'favorite', entry_id: entryId });
   });
   res.json({ is_favorited: true });
 }));
