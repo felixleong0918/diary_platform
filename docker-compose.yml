@@ -1,0 +1,30 @@
+# 啟動 PostgreSQL 與 MongoDB：docker compose up -d
+# 若本機已有服務佔用 5432 或 27017，可在根目錄 .env 設定 PG_PORT / MONGO_PORT，
+# 並同步修改 backend/.env 的 DATABASE_URL / MONGO_URL。
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: diary
+      POSTGRES_PASSWORD: diary
+      POSTGRES_DB: diary
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U diary -d diary"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongodata:/data/db
+
+volumes:
+  pgdata:
+  mongodata:

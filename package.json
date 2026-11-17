@@ -1,0 +1,17 @@
+{
+  "name": "diary-blog-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "日記與個人部落格平台（資料庫管理 115-1 期末專案，第 16 組）",
+  "scripts": {
+    "setup": "npm install --prefix backend && npm install --prefix frontend",
+    "db:init": "npm run db:init --prefix backend",
+    "db:reset": "npm run db:reset --prefix backend",
+    "db:seed": "npm run db:seed --prefix backend --",
+    "dev:api": "npm run dev --prefix backend",
+    "dev:web": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "start": "npm start --prefix backend",
+    "test": "npm test --prefix backend"
+  }
+}

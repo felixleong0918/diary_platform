@@ -1,0 +1,24 @@
+# 相依套件與建置產物
+node_modules/
+frontend/dist/
+
+# 環境設定（含密鑰）：只提交 .env.example
+.env
+.env.*
+!.env.example
+
+# 使用者上傳的照片（資料庫只存位置）
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# 資料庫備份與本機資料
+*.dump
+*.sql.gz
+pgdata/
+mongodata/
+
+# 系統與編輯器
+.DS_Store
+*.log
+.vscode/
+.idea/

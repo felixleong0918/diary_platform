@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>日記平台</title>
+    <script>
+      // 在第一次繪製前套用外觀，避免深淺色閃爍
+      (function () {
+        try {
+          var s = localStorage.getItem('scheme');
+          if (s !== 'light' && s !== 'dark') s = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.dataset.scheme = s;
+        } catch (e) {
+          document.documentElement.dataset.scheme = 'light';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
