@@ -475,6 +475,23 @@ a.listrow:hover { background: var(--soft); }
 .reply-link:hover { color: var(--ink); }
 .mention { font-weight: 600; text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 3px; }
 
+/* ---- 歌曲播放器 ---- */
+.player { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(100%, 440px); }
+.article .player { align-items: flex-start; }
+.player .song { width: 100%; }
+.player .song > a { display: grid; place-items: center; color: var(--ink-2); }
+.player .song > a:hover { color: var(--ink); }
+.player .song-text { flex: 1; }
+button.song-disc { border: 0; cursor: pointer; transition: transform var(--t-fast), opacity var(--t-fast); }
+button.song-disc:hover { transform: scale(1.06); }
+button.song-disc:disabled { opacity: 0.5; cursor: default; }
+button.song-disc:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.player.is-on-tint .song { border-color: transparent; }
+.player-frame { width: 100%; max-width: 320px; aspect-ratio: 16 / 9; border-radius: var(--r-md); overflow: hidden; background: #000; }
+.player-frame[hidden] { display: none; }
+.player-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+.player.is-spotify iframe { width: 100%; border: 0; border-radius: var(--r-md); display: block; }
+
 @media (max-width: 900px) {
   .split { grid-template-columns: 1fr; gap: 40px; }
   .split > aside { position: static; }
