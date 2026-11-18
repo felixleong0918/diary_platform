@@ -86,6 +86,9 @@ CREATE TABLE blog (
   title_font     varchar(5)   NOT NULL DEFAULT 'serif',     -- 新增：標題字體
   song_title     varchar(120),                              -- 新增：代表歌曲名稱
   song_url       varchar(500),                              -- 新增：代表歌曲連結（https）
+  background_url text,                                      -- 新增：自訂背景圖的儲存位置
+  theme_scope    varchar(6)   NOT NULL DEFAULT 'header',    -- 新增：主題套用範圍（標頭或整個主頁）
+  CONSTRAINT blog_theme_scope_domain CHECK (theme_scope IN ('header', 'page')),
   CONSTRAINT blog_tagline_nonblank CHECK (tagline IS NULL OR char_length(btrim(tagline)) > 0),
   CONSTRAINT blog_cover_domain    CHECK (cover_pattern IN ('shapes', 'waves', 'grid', 'dots')),
   CONSTRAINT blog_font_domain     CHECK (title_font IN ('serif', 'sans', 'mono')),

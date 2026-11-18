@@ -6,7 +6,7 @@ import { BLOG_VISIBLE, PUBLIC_READABLE } from '../access.js';
 import { ENTRY_CARD, ENTRY_FROM } from '../entrySql.js';
 import { text, int, id, date, oneOf, paging, song } from '../validate.js';
 import { lookupSong } from '../songInfo.js';
-import { avatarSql, statusSql } from '../people.js';
+import { avatarSql, statusSql, backgroundSql } from '../people.js';
 import { logEvent } from '../mongo.js';
 
 const router = Router();
@@ -58,6 +58,7 @@ router.get('/tags/popular', wrap(async (_req, res) => {
 const BLOG_CARD = `
   b.blog_id, b.blog_name, b.description, b.status, b.created_at,
   b.tagline, b.cover_pattern, b.title_font, b.song_title, b.song_url,
+  b.theme_scope, ${backgroundSql('b')} AS background,
   u.user_id AS owner_id, u.nickname AS owner_nickname, u.username AS owner_username,
   ${avatarSql('u')} AS owner_avatar, ${statusSql('u')} AS owner_status_text,
   th.style_key, th.theme_name,
@@ -151,6 +152,7 @@ router.get('/me/space', requireLogin, wrap(async (req, res) => {
   const { rows } = await query(
     `SELECT b.blog_id, b.blog_name, b.description, b.status, b.theme_id, th.style_key, th.theme_name,
             b.tagline, b.cover_pattern, b.title_font, b.song_title, b.song_url,
+            b.theme_scope, ${backgroundSql('b')} AS background,
             th.status AS theme_status
        FROM blog b JOIN theme th ON th.theme_id = b.theme_id
       WHERE b.user_id = $1`,
@@ -175,6 +177,7 @@ router.put('/me/space', requireActive, wrap(async (req, res) => {
   const cover = oneOf(req.body.cover_pattern ?? 'shapes', '封面圖案', ['shapes', 'waves', 'grid', 'dots']);
   const font = oneOf(req.body.title_font ?? 'serif', '標題字體', ['serif', 'sans', 'mono']);
   const music = song(req.body);
+  const scope = oneOf(req.body.theme_scope ?? 'header', '主題套用範圍', ['header', 'page']);
   await tx(async (client) => {
     const blog = await client.query('SELECT theme_id FROM blog WHERE user_id = $1 FOR UPDATE', [req.user.user_id]);
     if (blog.rows[0].theme_id !== themeId) {
@@ -186,8 +189,8 @@ router.put('/me/space', requireActive, wrap(async (req, res) => {
     await client.query('UPDATE user_account SET nickname = $1 WHERE user_id = $2', [nickname, req.user.user_id]);
     await client.query(
       `UPDATE blog SET blog_name = $1, description = $2, theme_id = $3, tagline = $5, cover_pattern = $6,
-              title_font = $7, song_title = $8, song_url = $9 WHERE user_id = $4`,
-      [blogName, description, themeId, req.user.user_id, tagline, cover, font, music.song_title, music.song_url],
+              title_font = $7, song_title = $8, song_url = $9, theme_scope = $10 WHERE user_id = $4`,
+      [blogName, description, themeId, req.user.user_id, tagline, cover, font, music.song_title, music.song_url, scope],
     );
   });
   res.json({ ok: true });

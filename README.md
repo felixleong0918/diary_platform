@@ -8,11 +8,12 @@
 
 **訪客與一般使用者**
 
-- 依標題、作者或標籤搜尋公開日記；在單一空間內依分類與日期篩選
+- 依標題、作者或標籤搜尋公開日記，可切換「最新」或「熱門」（最近 30 天依留言、表情回應與收藏的合計排序）；在單一空間內依分類與日期篩選
 - 註冊後自動建立個人空間；可修改暱稱、空間名稱、簡介、主題與分類
-- 個人風格：一句話簽名、封面圖案、標題字體，以及一首代表歌曲
+- 個人風格：一句話簽名、封面圖案、標題字體、一首代表歌曲；個人主頁可上傳自訂背景圖，或讓主題的顏色鋪滿整個主頁
 - 寫日記：日期、標題、內文、1 至 5 分心情分數、分類、多個標籤、一張照片、一首歌，可設為公開或私密
 - 標籤可以自訂；歌曲貼上 YouTube 或 Spotify 連結會自動帶入歌名
+- 歌曲在頁面內播放：YouTube 連結進入空間時會嘗試自動播放（被瀏覽器擋下時顯示播放鈕），Spotify 連結顯示嵌入播放器（未登入 Spotify 時為 30 秒試聽）
 - 個人回顧：依月份、分類、標籤查詢，顯示篇數與平均心情分數
 - 日記留言與空間留言板；留言可以回覆（一層）並用 `@帳號` 提到別人
 - 對日記按表情回應：喜歡、抱抱、加油、好笑、難過
@@ -114,6 +115,7 @@ Schema 在 [`db/schema.sql`](db/schema.sql)，索引在 [`db/indexes.sql`](db/in
 | `diary_entry.song_title`、`song_url` | 這篇日記的歌；兩欄同時有值或同時為 NULL，連結只接受 https |
 | `blog.tagline`、`cover_pattern`、`title_font` | 簽名、封面圖案、標題字體 |
 | `blog.song_title`、`song_url` | 空間的代表歌曲 |
+| `blog.background_url`、`theme_scope` | 個人主頁的自訂背景圖位置；主題套用在標頭或整個主頁 |
 | `user_account.avatar_url` | 大頭貼的儲存位置 |
 | `user_account.status_text`、`status_expires_at` | 現在的心情與到期時間，兩欄同時有值或同時為 NULL |
 | `comment.parent_id` | 回覆的上層留言；以複合外鍵 `(parent_id, entry_id)` 保證回覆與上層留言屬於同一篇日記 |
@@ -166,7 +168,7 @@ Schema 在 [`db/schema.sql`](db/schema.sql)，索引在 [`db/indexes.sql`](db/in
 |---|---|---|
 | POST | `/auth/register`、`/auth/login`、`/auth/logout` | 註冊、登入、登出 |
 | GET、PUT | `/auth/me`、`/auth/password` | 目前使用者、修改密碼 |
-| GET | `/entries?q=&author=&tag=` | 公開搜尋 |
+| GET | `/entries?q=&author=&tag=&sort=` | 公開搜尋；`sort=hot` 為最近熱門 |
 | GET、POST、PUT、DELETE | `/entries/:id` | 日記 |
 | GET、PUT、DELETE | `/entries/:id/photo` | 照片 |
 | GET、POST | `/entries/:id/comments` | 日記留言 |
@@ -182,6 +184,7 @@ Schema 在 [`db/schema.sql`](db/schema.sql)，索引在 [`db/indexes.sql`](db/in
 | GET、PUT、DELETE | `/entries/:id/reactions`、`/entries/:id/reaction` | 表情回應 |
 | GET、POST | `/me/notifications`、`/me/notifications/unread-count`、`/me/notifications/read` | 通知 |
 | GET、PUT、DELETE | `/avatars/:userId`、`/me/avatar`、`/me/status` | 大頭貼與現在的心情 |
+| GET、PUT、DELETE | `/blogs/:id/background`、`/me/background` | 個人主頁的背景圖 |
 | GET | `/operator/dashboard`、`/operator/stats`、`/operator/analytics` | Dashboard 與搜尋分析 |
 | GET、PUT、DELETE | `/operator/entries`、`/operator/comments`、`/operator/guestbook` | 公開內容的隱藏、恢復與永久刪除 |
 | GET、PUT | `/operator/blogs`、`/operator/users/:id`、`/operator/users/:id/status`、`/operator/users/:id/roles` | 空間與帳號管理、營運者身分 |

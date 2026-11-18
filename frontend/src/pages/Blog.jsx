@@ -5,7 +5,8 @@ import { useAuth, useFeedback, usePageStyle } from '../context.jsx';
 import { useData, usePaged } from '../hooks.js';
 import Icon from '../components/Icon.jsx';
 import Messages from '../components/Messages.jsx';
-import { Avatar, Button, Empty, EntryCard, Field, LoadMore, Segmented, Skeletons, SongLink } from '../components/ui.jsx';
+import { Avatar, Button, Empty, EntryCard, Field, LoadMore, Segmented, Skeletons } from '../components/ui.jsx';
+import SongPlayer from '../components/SongPlayer.jsx';
 import { ThemeArt } from '../components/Art.jsx';
 
 export default function Blog() {
@@ -55,8 +56,16 @@ export default function Blog() {
   };
   const hasFilter = filter.category_no || filter.from || filter.to;
 
+  // 有自訂背景圖，或主題設定為套用到整個主頁時：背景鋪滿畫面，內容放在一張底色的面板上以維持可讀性
+  const backdrop = b.background ? 'image' : b.theme_scope === 'page' ? 'tint' : null;
+
   return (
-    <main className="page stack is-loose">
+    <>
+    {backdrop && (
+      <div className={`space-backdrop is-${backdrop}`} aria-hidden="true"
+        style={backdrop === 'image' ? { backgroundImage: `url("${b.background}")` } : undefined} />
+    )}
+    <main className={`page stack is-loose ${backdrop ? 'is-sheet' : ''}`}>
       <header className="glass theme-tile panel is-roomy stack center" style={{ padding: '56px 24px 48px', gap: 12 }}>
         <ThemeArt pattern={b.cover_pattern} />
         {b.is_owner && b.status !== 'active' && (
@@ -69,7 +78,7 @@ export default function Blog() {
         {b.tagline && <p className="tagline">{b.tagline}</p>}
         <p className="lede" style={{ fontSize: 18 }}>{b.owner_nickname} · @{b.owner_username}</p>
         {b.description && <p className="muted prewrap" style={{ maxWidth: 560 }}>{b.description}</p>}
-        <SongLink title={b.song_title} url={b.song_url} className="is-on-tint" />
+        <SongPlayer title={b.song_title} url={b.song_url} autoplay className="is-on-tint" />
         <p className="tiny num">{b.public_entry_count} 篇公開日記 · {b.follower_count} 人追蹤 · 主題「{b.theme_name}」</p>
         <div className="row" style={{ marginTop: 8, justifyContent: 'center' }}>
           {b.is_owner ? (
@@ -150,5 +159,6 @@ export default function Blog() {
         </section>
       )}
     </main>
+    </>
   );
 }

@@ -424,6 +424,67 @@ test('大頭貼與現在的心情', async () => {
   assert.equal((await alice.del('/api/me/status')).status, 200);
 });
 
+test('熱門排序：最近 30 天公開的日記依互動數排序，不含私密與過期的日記', async () => {
+  const make = async (title) => (await alice.post('/api/entries', entryBody({ visibility: 'public', title }))).body.entry.entry_id;
+  const quiet = await make('熱門測試：沒人理');
+  const busy = await make('熱門測試：很多互動');
+  const old = await make('熱門測試：很久以前');
+  await bob.post(`/api/entries/${busy}/comments`, { content: '留言' });
+  await bob.put(`/api/entries/${busy}/reaction`, { reaction: 'like' });
+  await bob.post(`/api/entries/${busy}/favorite`);
+  await bob.post(`/api/entries/${old}/comments`, { content: '一' });
+  await op.post(`/api/entries/${old}/comments`, { content: '二' });
+  await op.put(`/api/entries/${old}/reaction`, { reaction: 'like' });
+  await op.post(`/api/entries/${old}/favorite`);
+  await pool.query(`UPDATE diary_entry SET published_at = now() - interval '40 days', created_at = now() - interval '41 days',
+                           updated_at = now() - interval '40 days' WHERE entry_id = $1`, [old]);
+
+  const hot = (await guest.get('/api/entries?sort=hot&q=' + encodeURIComponent('熱門測試'))).body;
+  assert.deepEqual(hot.entries.map((e) => e.entry_id), [busy, quiet], '互動多的在前，超過 30 天的不列入');
+  assert.equal(hot.entries[0].hot_score, 3);
+  assert.equal(hot.sort, 'hot');
+  const latest = (await guest.get('/api/entries?q=' + encodeURIComponent('熱門測試'))).body.entries.map((e) => e.entry_id);
+  assert.deepEqual(latest, [busy, quiet, old], '預設仍依公開時間');
+  assert.equal((await guest.get('/api/entries?sort=random')).status, 400);
+  const all = (await guest.get('/api/entries?sort=hot&size=50')).body.entries;
+  assert.equal(all.some((e) => e.entry_id === ids.privateEntry), false);
+  assert.equal(JSON.stringify(all).includes('私密的事'), false);
+  await bob.del(`/api/entries/${busy}/favorite`);       // 不影響後面檢查收藏清單的測試
+});
+
+test('個人主頁：自訂背景圖與主題套用範圍', async () => {
+  const space = (await alice.get('/api/me/space')).body;
+  const body = { nickname: space.nickname, blog_name: space.blog.blog_name, description: '', theme_id: space.blog.theme_id };
+  assert.equal(space.blog.theme_scope, 'header', '預設只套用在標頭');
+  assert.equal((await alice.put('/api/me/space', { ...body, theme_scope: 'everything' })).status, 400);
+  assert.equal((await alice.put('/api/me/space', { ...body, theme_scope: 'page' })).status, 200);
+
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const form = new FormData();
+  form.append('background', new Blob([png], { type: 'image/png' }), 'bg.png');
+  assert.equal((await guest.upload('/api/me/background', form)).status, 401);
+  assert.equal((await alice.upload('/api/me/background', form)).status, 200);
+  const blog = (await guest.get(`/api/blogs/${ids.alice.blog_id}`)).body.blog;
+  assert.equal(blog.theme_scope, 'page');
+  assert.match(blog.background, /^\/api\/blogs\/B\d{8}\/background\?v=/);
+  const img = await fetch(base + blog.background);
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+
+  // 空間被隱藏時，別人拿不到背景圖，主人自己可以
+  await op.put(`/api/operator/blogs/${ids.alice.blog_id}/status`, { status: 'hidden' });
+  assert.equal((await guest.get(`/api/blogs/${ids.alice.blog_id}/background`)).status, 404);
+  assert.equal((await alice.get(`/api/blogs/${ids.alice.blog_id}/background`)).status, 200);
+  await op.put(`/api/operator/blogs/${ids.alice.blog_id}/status`, { status: 'active' });
+
+  const bad = new FormData();
+  bad.append('background', new Blob(['x'], { type: 'image/gif' }), 'bg.gif');
+  assert.equal((await alice.upload('/api/me/background', bad)).status, 400);
+  assert.equal((await alice.del('/api/me/background')).status, 200);
+  assert.equal((await guest.get(`/api/blogs/${ids.alice.blog_id}`)).body.blog.background, null);
+  assert.equal((await alice.put('/api/me/space', body)).status, 200);
+});
+
 test('Dashboard：各序列長度與期間一致，不含私密內文', async () => {
   assert.equal((await alice.get('/api/operator/dashboard')).status, 403);
   const r = await op.get('/api/operator/dashboard?days=14');

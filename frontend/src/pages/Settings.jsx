@@ -25,6 +25,8 @@ export default function Settings() {
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [mood, setMood] = useState({ status_text: '', duration: '24h' });
   const [moodBusy, setMoodBusy] = useState(false);
+  const bgRef = useRef(null);
+  const [bgBusy, setBgBusy] = useState(false);
 
   useEffect(() => {
     if (space.data && !form) {
@@ -32,7 +34,7 @@ export default function Settings() {
         nickname: space.data.nickname, blog_name: space.data.blog.blog_name,
         description: space.data.blog.description || '', theme_id: space.data.blog.theme_id,
         tagline: space.data.blog.tagline || '', cover_pattern: space.data.blog.cover_pattern,
-        title_font: space.data.blog.title_font,
+        title_font: space.data.blog.title_font, theme_scope: space.data.blog.theme_scope,
         song_url: space.data.blog.song_url || '', song_title: space.data.blog.song_title || '',
       });
     }
@@ -88,6 +90,24 @@ export default function Settings() {
   };
   const removeAvatar = async () => {
     try { await api.del('/me/avatar'); await refresh(); toast('已移除大頭貼'); } catch (err) { fail(err); }
+  };
+  // 背景圖選好就直接上傳，不必再按「儲存空間設定」
+  const pickBackground = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) { fail({ message: '背景圖大小不可超過 4 MB' }); return; }
+    setBgBusy(true);
+    try {
+      const data = new FormData();
+      data.append('background', file);
+      await api.put('/me/background', data);
+      await space.reload();
+      toast('背景圖已更新');
+    } catch (err) { fail(err); } finally { setBgBusy(false); }
+  };
+  const removeBackground = async () => {
+    try { await api.del('/me/background'); await space.reload(); toast('已移除背景圖'); } catch (err) { fail(err); }
   };
   const saveMood = async (e) => {
     e.preventDefault();
@@ -182,6 +202,26 @@ export default function Settings() {
               </button>
             ))}
           </div>
+        </div>
+        <div className="field">
+          <span>主題套用範圍</span>
+          <div><Segmented label="主題套用範圍" value={form.theme_scope} onChange={(v) => setForm({ ...form, theme_scope: v })}
+            options={[{ value: 'header', label: '只有標頭' }, { value: 'page', label: '整個主頁' }]} /></div>
+          <small>選「整個主頁」時，主題的顏色會鋪滿你的個人主頁。有上傳背景圖時以背景圖為主。</small>
+        </div>
+        <div className="field">
+          <span>背景圖</span>
+          <div className="row">
+            {current.background && <img className="bg-thumb" src={current.background} alt="目前的背景圖" />}
+            <div className="row is-tight">
+              <input ref={bgRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={pickBackground} />
+              <Button type="button" busy={bgBusy} disabled={isSuspended} onClick={() => bgRef.current.click()}>
+                <Icon name="image" size={17} />{current.background ? '更換背景圖' : '上傳背景圖'}
+              </Button>
+              {current.background && <Button type="button" className="is-quiet is-danger" onClick={removeBackground}>移除</Button>}
+            </div>
+          </div>
+          <small>JPG、PNG 或 WebP，最大 4 MB。圖片會鋪滿整個個人主頁，選好後立即生效。</small>
         </div>
         <Field label="簽名" hint="顯示在空間名稱下方的一句話，最多 60 字">
           <input className="input" maxLength={60} value={form.tagline} placeholder="例如：慢慢來，比較快。" onChange={(e) => setForm({ ...form, tagline: e.target.value })} />

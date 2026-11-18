@@ -6,7 +6,8 @@ import { useData } from '../hooks.js';
 import Icon from '../components/Icon.jsx';
 import Messages from '../components/Messages.jsx';
 import Reactions from '../components/Reactions.jsx';
-import { Avatar, Button, Empty, Mood, StatusBadges, SongLink } from '../components/ui.jsx';
+import { Avatar, Button, Empty, Mood, StatusBadges } from '../components/ui.jsx';
+import SongPlayer from '../components/SongPlayer.jsx';
 
 export default function Entry() {
   const { entryId } = useParams();
@@ -98,7 +99,7 @@ export default function Entry() {
         {e.has_photo && (
           <div className="article-photo"><img src={photoUrl(e.entry_id, e.updated_at)} alt={`${e.title} 的照片`} /></div>
         )}
-        <SongLink title={e.song_title} url={e.song_url} />
+        <SongPlayer title={e.song_title} url={e.song_url} autoplay />
         <div className="article-body prewrap">{e.content}</div>
 
         {e.tags.length > 0 && (
