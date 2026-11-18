@@ -99,7 +99,7 @@ export default function Entry() {
         {e.has_photo && (
           <div className="article-photo"><img src={photoUrl(e.entry_id, e.updated_at)} alt={`${e.title} 的照片`} /></div>
         )}
-        <SongPlayer title={e.song_title} url={e.song_url} />
+        <SongPlayer title={e.song_title} url={e.song_url} autoplay />
         <div className="article-body prewrap">{e.content}</div>
 
         {e.tags.length > 0 && (

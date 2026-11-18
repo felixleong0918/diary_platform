@@ -1,4 +1,4 @@
-// 歌曲播放器：YouTube 連結在頁面內播放（空間頁會嘗試自動播放），
+// 歌曲播放器：YouTube 連結在頁面內播放（空間頁與日記頁會嘗試自動播放），
 // Spotify 連結顯示官方的嵌入播放器（未登入 Spotify 時是 30 秒試聽），
 // 其他網站維持開新分頁的連結。
 import { useEffect, useRef, useState } from 'react';

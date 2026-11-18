@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, useFeedback, useLook, useUnread } from '../context.jsx';
 import Icon from './Icon.jsx';
 import { Avatar, useSlidingPill } from './ui.jsx';
+import NotificationBell from './NotificationBell.jsx';
 
 export default function NavBar() {
   const { user, ready, isOperator, logout } = useAuth();
@@ -12,7 +13,7 @@ export default function NavBar() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
-  const { unread, refreshUnread } = useUnread();
+  const { refreshUnread } = useUnread();
   useEffect(() => { refreshUnread(); }, [pathname, refreshUnread]);
 
   const tabs = [
@@ -70,10 +71,7 @@ export default function NavBar() {
         )}
         {user && (
           <>
-            <Link to="/notifications" className="btn is-quiet is-icon nav-bell" aria-label={unread ? `通知，${unread} 則未讀` : '通知'}>
-              <Icon name="bell" />
-              {unread > 0 && <b className="num">{unread > 99 ? '99+' : unread}</b>}
-            </Link>
+            <NotificationBell />
             <Link to="/write" className="btn is-quiet" aria-label="寫日記">
               <Icon name="pen" size={17} /><span className="btn-label">寫日記</span>
             </Link>
