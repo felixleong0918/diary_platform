@@ -6,7 +6,7 @@ import Icon from '../components/Icon.jsx';
 import { Button, Empty, Field, Segmented, SongField } from '../components/ui.jsx';
 
 const MOODS = ['很差', '不太好', '普通', '不錯', '很好'];
-const BLANK = { entry_date: today(), title: '', content: '', mood_score: null, category_no: '', visibility: 'private', tag_ids: [], song_url: '', song_title: '' };
+const BLANK = { entry_date: today(), title: '', content: '', mood_score: null, category_no: '', visibility: 'public', tag_ids: [], song_url: '', song_title: '' };
 
 export default function Editor() {
   const { entryId } = useParams();

@@ -268,6 +268,24 @@ CREATE UNIQUE INDEX notification_once_idx
   ON notification (user_id, actor_id, kind, COALESCE(entry_id, '-'))
   WHERE kind IN ('favorite', 'reaction', 'follow');
 
+-- Platform operator moderation audit trail. Target IDs intentionally have no FK
+-- so records survive if a target is eventually purged.
+CREATE TABLE operator_audit_log (
+  audit_id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  operator_id       char(9) NOT NULL REFERENCES user_account (user_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  operator_username varchar(30) NOT NULL,
+  operator_nickname varchar(50) NOT NULL,
+  action            varchar(12) NOT NULL,
+  target_type       varchar(12) NOT NULL,
+  target_id         char(9) NOT NULL,
+  target_summary    text NOT NULL DEFAULT '',
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT operator_audit_action_domain CHECK (action IN ('delete', 'suspend', 'reactivate')),
+  CONSTRAINT operator_audit_target_domain CHECK (target_type IN ('entry', 'comment', 'guestbook', 'account'))
+);
+CREATE INDEX operator_audit_created_idx ON operator_audit_log (created_at DESC, audit_id DESC);
+CREATE INDEX operator_audit_operator_idx ON operator_audit_log (operator_id, created_at DESC);
+
 -- ---------------------------------------------------------------------
 -- Row Level Security
 -- Supabase 會替 public schema 的資料表自動產生對外的 Data API。
@@ -288,5 +306,6 @@ ALTER TABLE blog_follow     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE diary_tag       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE diary_reaction  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operator_audit_log ENABLE ROW LEVEL SECURITY;
 
 COMMIT;

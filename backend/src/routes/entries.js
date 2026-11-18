@@ -149,7 +149,7 @@ function readEntryBody(body) {
     content,
     mood_score: int(body.mood_score, '心情分數', { min: 1, max: 5 }),
     category_no: int(body.category_no, '分類', { min: 1, optional: true }),
-    visibility: oneOf(body.visibility ?? 'private', '可見度', ['public', 'private']),
+    visibility: oneOf(body.visibility ?? 'public', '可見度', ['public', 'private']),
     tag_ids: tagIds,
     ...song(body),
   };

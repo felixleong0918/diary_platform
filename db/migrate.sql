@@ -87,6 +87,23 @@ CREATE INDEX IF NOT EXISTS notification_unread_idx  ON notification (user_id) WH
 ALTER TABLE diary_reaction ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification   ENABLE ROW LEVEL SECURITY;
 
+-- Operator moderation audit trail. Target IDs deliberately have no FK so the
+-- audit history remains readable if target rows are purged in the future.
+CREATE TABLE IF NOT EXISTS operator_audit_log (
+  audit_id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  operator_id       char(9) NOT NULL REFERENCES user_account (user_id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  operator_username varchar(30) NOT NULL,
+  operator_nickname varchar(50) NOT NULL,
+  action            varchar(12) NOT NULL CHECK (action IN ('delete', 'suspend', 'reactivate')),
+  target_type       varchar(12) NOT NULL CHECK (target_type IN ('entry', 'comment', 'guestbook', 'account')),
+  target_id         char(9) NOT NULL,
+  target_summary    text NOT NULL DEFAULT '',
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS operator_audit_created_idx ON operator_audit_log (created_at DESC, audit_id DESC);
+CREATE INDEX IF NOT EXISTS operator_audit_operator_idx ON operator_audit_log (operator_id, created_at DESC);
+ALTER TABLE operator_audit_log ENABLE ROW LEVEL SECURITY;
+
 -- 2026-11：個人主頁的自訂背景圖與主題套用範圍
 ALTER TABLE blog
   ADD COLUMN IF NOT EXISTS background_url text,
