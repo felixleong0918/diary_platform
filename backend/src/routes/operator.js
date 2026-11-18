@@ -14,6 +14,15 @@ const router = Router();
 router.use(requireOperator);
 const like = (s) => `%${s.replace(/[\\%_]/g, '\\$&')}%`;
 
+async function recordOperatorAction(client, req, { action, targetType, targetId, targetSummary }) {
+  await client.query(
+    `INSERT INTO operator_audit_log
+       (operator_id, operator_username, operator_nickname, action, target_type, target_id, target_summary)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [req.user.user_id, req.user.username, req.user.nickname, action, targetType, targetId, String(targetSummary || '').slice(0, 500)],
+  );
+}
+
 // =====================================================================
 // 主題與標籤：新增、更名或停用。停用後不可新選，既有引用仍保留。
 // =====================================================================
@@ -282,10 +291,23 @@ router.put('/users/:userId/status', wrap(async (req, res) => {
   const userId = id(req.params.userId, '使用者代號', 'U');
   const status = oneOf(req.body.status, '狀態', ['active', 'suspended']);
   if (userId === req.user.user_id) throw badRequest('不能變更自己的帳號狀態');
-  const { rowCount } = await query(
-    `UPDATE user_account SET status = $2 WHERE user_id = $1 AND status <> 'deactivated'`,
-    [userId, status],
-  );
+  const { rowCount } = await tx(async (client) => {
+    const current = await client.query(
+      'SELECT user_id, username, nickname, status FROM user_account WHERE user_id = $1 FOR UPDATE',
+      [userId],
+    );
+    const target = current.rows[0];
+    if (!target || target.status === 'deactivated') return { rowCount: 0 };
+    if (target.status === status) return { rowCount: 1 };
+    await client.query('UPDATE user_account SET status = $2 WHERE user_id = $1', [userId, status]);
+    await recordOperatorAction(client, req, {
+      action: status === 'suspended' ? 'suspend' : 'reactivate',
+      targetType: 'account',
+      targetId: target.user_id,
+      targetSummary: `@${target.username} (${target.nickname}): ${target.status} -> ${status}`,
+    });
+    return { rowCount: 1 };
+  });
   if (!rowCount) throw notFound('找不到這個帳號，或帳號已停用');
   res.json({ ok: true });
 }));
@@ -293,6 +315,26 @@ router.put('/users/:userId/status', wrap(async (req, res) => {
 // =====================================================================
 // 營運統計（只用公開內容，不提供他人私密內文或心情分數）
 // =====================================================================
+router.get('/audit-log', wrap(async (req, res) => {
+  const { limit, offset, page, size } = paging(req, 25);
+  const targetType = oneOf(req.query.target_type, 'target type', ['entry', 'comment', 'guestbook', 'account'], { optional: true });
+  const action = oneOf(req.query.action, 'action', ['delete', 'suspend', 'reactivate'], { optional: true });
+  const params = [limit + 1, offset];
+  let where = 'TRUE';
+  if (targetType) { params.push(targetType); where += ` AND target_type = $${params.length}`; }
+  if (action) { params.push(action); where += ` AND action = $${params.length}`; }
+  const { rows } = await query(
+    `SELECT audit_id, operator_username, operator_nickname,
+            action, target_type, target_summary, created_at
+       FROM operator_audit_log
+      WHERE ${where}
+      ORDER BY created_at DESC, audit_id DESC
+      LIMIT $1 OFFSET $2`,
+    params,
+  );
+  res.json({ logs: rows.slice(0, size), page, has_more: rows.length > size });
+}));
+
 router.get('/stats', wrap(async (req, res) => {
   const days = int(req.query.days, '天數', { min: 1, max: 365, optional: true }) || 30;
   const [totals, daily, tags, interactions, weekly] = await Promise.all([
@@ -382,9 +424,25 @@ router.delete('/entries/:entryId', wrap(async (req, res) => {
   const entryId = id(req.params.entryId, '日記代號', 'E');
   // 與隱藏相同的範圍：公開日記，或先前被營運者隱藏的日記
   const { rowCount } = await query(
-    `UPDATE diary_entry SET status = 'deleted', updated_at = now()
-      WHERE entry_id = $1 AND status <> 'deleted' AND (visibility = 'public' OR status = 'hidden')`,
-    [entryId],
+    `WITH target AS (
+       SELECT e.entry_id, e.title, b.blog_name, u.nickname AS author_nickname
+         FROM diary_entry e
+         JOIN blog b ON b.blog_id = e.blog_id
+         JOIN user_account u ON u.user_id = b.user_id
+        WHERE e.entry_id = $1 AND e.status <> 'deleted'
+          AND (e.visibility = 'public' OR e.status = 'hidden')
+        FOR UPDATE OF e
+     ), deleted AS (
+       UPDATE diary_entry e SET status = 'deleted', updated_at = now()
+         FROM target t WHERE e.entry_id = t.entry_id
+       RETURNING e.entry_id, t.title, t.blog_name, t.author_nickname
+     )
+     INSERT INTO operator_audit_log
+       (operator_id, operator_username, operator_nickname, action, target_type, target_id, target_summary)
+     SELECT $2, $3, $4, 'delete', 'entry', entry_id,
+            concat_ws(' · ', title, author_nickname, blog_name)
+       FROM deleted`,
+    [entryId, req.user.user_id, req.user.username, req.user.nickname],
   );
   if (!rowCount) throw notFound('找不到這篇日記，或它不是公開內容');
   res.json({ ok: true });
@@ -393,8 +451,24 @@ router.delete('/entries/:entryId', wrap(async (req, res) => {
 router.delete('/comments/:commentId', wrap(async (req, res) => {
   const commentId = id(req.params.commentId, '留言代號', 'C');
   const { rowCount } = await query(
-    `UPDATE comment SET status = 'deleted', updated_at = now() WHERE comment_id = $1 AND status <> 'deleted'`,
-    [commentId],
+    `WITH target AS (
+       SELECT cm.comment_id, cm.content, e.title AS entry_title, u.nickname AS author_nickname
+         FROM comment cm
+         JOIN diary_entry e ON e.entry_id = cm.entry_id
+         JOIN user_account u ON u.user_id = cm.user_id
+        WHERE cm.comment_id = $1 AND cm.status <> 'deleted'
+        FOR UPDATE OF cm
+     ), deleted AS (
+       UPDATE comment cm SET status = 'deleted', updated_at = now()
+         FROM target t WHERE cm.comment_id = t.comment_id
+       RETURNING cm.comment_id, t.content, t.entry_title, t.author_nickname
+     )
+     INSERT INTO operator_audit_log
+       (operator_id, operator_username, operator_nickname, action, target_type, target_id, target_summary)
+     SELECT $2, $3, $4, 'delete', 'comment', comment_id,
+            concat_ws(' · ', author_nickname, entry_title, left(content, 180))
+       FROM deleted`,
+    [commentId, req.user.user_id, req.user.username, req.user.nickname],
   );
   if (!rowCount) throw notFound('找不到這則留言');
   res.json({ ok: true });
@@ -403,8 +477,24 @@ router.delete('/comments/:commentId', wrap(async (req, res) => {
 router.delete('/guestbook/:guestbookId', wrap(async (req, res) => {
   const guestbookId = id(req.params.guestbookId, '訊息代號', 'G');
   const { rowCount } = await query(
-    `UPDATE guestbook_entry SET status = 'deleted', updated_at = now() WHERE guestbook_id = $1 AND status <> 'deleted'`,
-    [guestbookId],
+    `WITH target AS (
+       SELECT g.guestbook_id, g.content, b.blog_name, u.nickname AS author_nickname
+         FROM guestbook_entry g
+         JOIN blog b ON b.blog_id = g.blog_id
+         JOIN user_account u ON u.user_id = g.user_id
+        WHERE g.guestbook_id = $1 AND g.status <> 'deleted'
+        FOR UPDATE OF g
+     ), deleted AS (
+       UPDATE guestbook_entry g SET status = 'deleted', updated_at = now()
+         FROM target t WHERE g.guestbook_id = t.guestbook_id
+       RETURNING g.guestbook_id, t.content, t.blog_name, t.author_nickname
+     )
+     INSERT INTO operator_audit_log
+       (operator_id, operator_username, operator_nickname, action, target_type, target_id, target_summary)
+     SELECT $2, $3, $4, 'delete', 'guestbook', guestbook_id,
+            concat_ws(' · ', author_nickname, blog_name, left(content, 180))
+       FROM deleted`,
+    [guestbookId, req.user.user_id, req.user.username, req.user.nickname],
   );
   if (!rowCount) throw notFound('找不到這則訊息');
   res.json({ ok: true });

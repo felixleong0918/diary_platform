@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, formatTime, qs } from '../api.js';
 import { useAuth, useFeedback } from '../context.jsx';
 import { useData, usePaged } from '../hooks.js';
-import { Button, Empty, LoadMore, Segmented } from '../components/ui.jsx';
+import { Avatar, Button, Empty, LoadMore, Segmented } from '../components/ui.jsx';
 import { Heatmap, SegmentedBar, Sparkline, TimeChart } from '../components/Charts.jsx';
 
 const TABS = [
@@ -11,6 +11,7 @@ const TABS = [
   { value: 'content', label: '公開內容' },
   { value: 'accounts', label: '帳號與權限' },
   { value: 'catalog', label: '主題與標籤' },
+  { value: 'audit', label: '操作紀錄' },
   { value: 'analytics', label: '搜尋分析' },
 ];
 const RANGES = [{ value: 7, label: '7 天' }, { value: 30, label: '30 天' }, { value: 90, label: '90 天' }];
@@ -29,6 +30,7 @@ export default function Operator() {
       {tab === 'content' && <Content />}
       {tab === 'accounts' && <Accounts />}
       {tab === 'catalog' && <Catalog />}
+      {tab === 'audit' && <AuditLog />}
       {tab === 'analytics' && <Analytics />}
     </main>
   );
@@ -262,6 +264,102 @@ const KINDS = {
   comments: { label: '日記留言', key: 'comment_id', list: 'comments', on: 'visible', off: 'hidden' },
   guestbook: { label: '留言板', key: 'guestbook_id', list: 'messages', on: 'visible', off: 'hidden' },
 };
+
+const AUDIT_TARGETS = [
+  { value: '', label: '全部對象' },
+  { value: 'entry', label: '貼文' },
+  { value: 'comment', label: '留言' },
+  { value: 'guestbook', label: '訪客留言' },
+  { value: 'account', label: '帳號' },
+];
+const AUDIT_ACTIONS = [
+  { value: '', label: '全部動作' },
+  { value: 'delete', label: '刪除' },
+  { value: 'suspend', label: '停權' },
+  { value: 'reactivate', label: '恢復帳號' },
+];
+const AUDIT_TARGET_LABEL = Object.fromEntries(AUDIT_TARGETS.filter((x) => x.value).map((x) => [x.value, x.label]));
+const AUDIT_ACTION_LABEL = Object.fromEntries(AUDIT_ACTIONS.filter((x) => x.value).map((x) => [x.value, x.label]));
+
+function auditActionLabel(log) {
+  if (log.action === 'delete') return `刪除${AUDIT_TARGET_LABEL[log.target_type] || '項目'}`;
+  if (log.action === 'suspend') return '停權帳號';
+  if (log.action === 'reactivate') return '恢復帳號';
+  return AUDIT_ACTION_LABEL[log.action] || '操作';
+}
+
+function auditTargetSummary(log) {
+  const summary = log.target_summary || '';
+  if (log.target_type !== 'account') return summary || '未提供摘要';
+  const match = summary.match(/^@([^\s]+)\s+\((.*?)\)(?:\s*:.*|\s*·.*)?$/);
+  return match ? `${match[2]} (@${match[1]})` : summary.split(':')[0] || '帳號';
+}
+
+function AuditLog() {
+  const [targetType, setTargetType] = useState('');
+  const [action, setAction] = useState('');
+  const list = usePaged(
+    async (page) => {
+      const r = await api.get(`/operator/audit-log${qs({ target_type: targetType, action, page })}`);
+      return { items: r.logs, has_more: r.has_more };
+    },
+    [targetType, action],
+  );
+
+  return (
+    <div className="stack audit-page">
+      <header className="audit-header">
+        <div className="stack" style={{ gap: 6 }}>
+          <span className="tiny muted">營運管理</span>
+          <h2 className="section-title" style={{ margin: 0 }}>操作紀錄</h2>
+          <p className="small muted">依時間查看管理者執行的內容與帳號管理操作。</p>
+        </div>
+        <span className="audit-count">已載入 {list.items.length} 筆</span>
+      </header>
+      <div className="audit-toolbar">
+        <label className="audit-filter">
+          <span>對象</span>
+          <select className="select" value={targetType} onChange={(e) => setTargetType(e.target.value)}>
+            {AUDIT_TARGETS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </label>
+        <label className="audit-filter">
+          <span>動作</span>
+          <select className="select" value={action} onChange={(e) => setAction(e.target.value)}>
+            {AUDIT_ACTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </label>
+      </div>
+      {list.error ? <Empty title="讀取操作紀錄失敗">{list.error.message}</Empty>
+        : list.loading ? <div className="skeleton" style={{ minHeight: 180 }} />
+          : list.items.length === 0 ? <Empty title="目前沒有操作紀錄" /> : (
+            <section className="audit-list" aria-label="操作紀錄列表">
+              {list.items.map((log) => (
+                <article key={log.audit_id} className="audit-card">
+                  <span className={`audit-mark audit-mark--${log.action}`} aria-hidden="true">
+                    {log.action === 'delete' ? '−' : log.action === 'suspend' ? '!' : '↻'}
+                  </span>
+                  <div className="audit-content">
+                    <div className="audit-topline">
+                      <span className={`audit-action audit-action--${log.action}`}>{auditActionLabel(log)}</span>
+                      <time className="audit-time" dateTime={log.created_at}>{formatTime(log.created_at)}</time>
+                    </div>
+                    <p className="audit-summary">{auditTargetSummary(log)}</p>
+                    <div className="audit-operator">
+                      <Avatar name={log.operator_nickname} size="is-small" />
+                      <span className="audit-operator-name">{log.operator_nickname}</span>
+                      <span className="audit-operator-username">@{log.operator_username}</span>
+                      <span className="audit-operator-label">執行者</span>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </section>
+          )}
+      <LoadMore show={list.more} busy={list.loadingMore} onClick={list.loadMore} />
+    </div>
+  );
+}
 
 function Content() {
   const { fail, toast, confirm } = useFeedback();
