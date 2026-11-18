@@ -6,6 +6,8 @@ import { usePaged, useData } from '../hooks.js';
 import Icon from '../components/Icon.jsx';
 import { Avatar, Empty, EntryCard, LoadMore, Segmented, Skeletons } from '../components/ui.jsx';
 import { HeroArt } from '../components/Art.jsx';
+import Typewriter from '../components/Typewriter.jsx';
+import { HERO_LINES } from '../heroLines.js';
 
 const MODES = [
   { value: 'q', label: '標題', placeholder: '用標題關鍵字找公開日記' },
@@ -45,7 +47,7 @@ export default function Explore() {
         <section className="hero">
           <div className="hero-inner">
             <div className="hero-copy">
-              <h1 className="display">每一天，<br />都值得寫下來。</h1>
+              <h1 className="display"><Typewriter lines={HERO_LINES} /></h1>
               <p className="lede">寫給自己的日記，也可以是分享給別人的故事。</p>
               {ready && (
                 <Link to={user ? '/write' : '/register'} className="btn is-primary is-large">
