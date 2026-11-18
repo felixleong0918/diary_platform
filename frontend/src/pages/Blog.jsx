@@ -56,8 +56,16 @@ export default function Blog() {
   };
   const hasFilter = filter.category_no || filter.from || filter.to;
 
+  // 有自訂背景圖，或主題設定為套用到整個主頁時：背景鋪滿畫面，內容放在一張底色的面板上以維持可讀性
+  const backdrop = b.background ? 'image' : b.theme_scope === 'page' ? 'tint' : null;
+
   return (
-    <main className="page stack is-loose">
+    <>
+    {backdrop && (
+      <div className={`space-backdrop is-${backdrop}`} aria-hidden="true"
+        style={backdrop === 'image' ? { backgroundImage: `url("${b.background}")` } : undefined} />
+    )}
+    <main className={`page stack is-loose ${backdrop ? 'is-sheet' : ''}`}>
       <header className="glass theme-tile panel is-roomy stack center" style={{ padding: '56px 24px 48px', gap: 12 }}>
         <ThemeArt pattern={b.cover_pattern} />
         {b.is_owner && b.status !== 'active' && (
@@ -151,5 +159,6 @@ export default function Blog() {
         </section>
       )}
     </main>
+    </>
   );
 }

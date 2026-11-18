@@ -4,6 +4,11 @@ export const avatarSql = (alias) =>
   `CASE WHEN ${alias}.avatar_url IS NOT NULL
         THEN '/api/avatars/' || ${alias}.user_id || '?v=' || right(${alias}.avatar_url, 12) END`;
 
+/** 空間的自訂背景圖網址（沒有上傳時為 NULL）。 */
+export const backgroundSql = (alias) =>
+  `CASE WHEN ${alias}.background_url IS NOT NULL
+        THEN '/api/blogs/' || ${alias}.blog_id || '/background?v=' || right(${alias}.background_url, 12) END`;
+
 /** 尚未到期的「現在的心情」。 */
 export const statusSql = (alias) =>
   `CASE WHEN ${alias}.status_expires_at > now() THEN ${alias}.status_text END`;

@@ -2,10 +2,10 @@
 // 螢幕閱讀器只會讀到固定的第一句；系統設定為減少動態效果時不打字，直接顯示第一句。
 import { useEffect, useState } from 'react';
 
-const TYPE_MS = 110;     // 每打一個字
-const ERASE_MS = 45;     // 每刪一個字
+const TYPE_MS = 220;     // 每打一個字
+const ERASE_MS = 110;    // 每刪一個字
 const HOLD_MS = 2600;    // 打完後停留
-const GAP_MS = 450;      // 刪完後到下一句
+const GAP_MS = 600;      // 刪完後到下一句
 
 export default function Typewriter({ lines }) {
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;

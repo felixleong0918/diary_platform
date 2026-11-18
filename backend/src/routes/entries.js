@@ -15,13 +15,18 @@ const router = Router();
 const like = (s) => `%${s.replace(/[\\%_]/g, '\\$&')}%`;
 
 // ---- 公開搜尋：標題關鍵字、作者、標籤 -----------------------------------
+// sort=latest（預設）依公開時間；sort=hot 取最近 30 天公開的日記，
+// 依留言、表情回應與收藏的合計數排序，同分時較新的在前。
+const HOT_DAYS = 30;
 router.get('/entries', wrap(async (req, res) => {
   const { limit, offset, page, size } = paging(req, 12);
   const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
   const author = typeof req.query.author === 'string' ? req.query.author.trim().slice(0, 50) : '';
   const tag = typeof req.query.tag === 'string' ? req.query.tag.trim().toLowerCase().slice(0, 30) : '';
+  const sort = oneOf(req.query.sort ?? 'latest', '排序方式', ['latest', 'hot']);
   const params = [limit + 1, offset];
   let where = PUBLIC_READABLE;
+  if (sort === 'hot') where += ` AND e.published_at >= now() - interval '${HOT_DAYS} days'`;
   if (q) { params.push(like(q)); where += ` AND e.title ILIKE $${params.length}`; }
   if (author) {
     params.push(like(author));
@@ -33,10 +38,15 @@ router.get('/entries', wrap(async (req, res) => {
                             WHERE dt.entry_id = e.entry_id AND t.tag_name = $${params.length})`;
   }
   const { rows } = await query(
-    `SELECT ${ENTRY_CARD} ${ENTRY_FROM}
-      WHERE ${where}
-      ORDER BY e.published_at DESC, e.entry_id DESC
-      LIMIT $1 OFFSET $2`,
+    sort === 'hot'
+      ? `SELECT x.*, (x.comment_count + x.reaction_count + x.favorite_count) AS hot_score
+           FROM (SELECT ${ENTRY_CARD} ${ENTRY_FROM} WHERE ${where}) x
+          ORDER BY hot_score DESC, x.published_at DESC, x.entry_id DESC
+          LIMIT $1 OFFSET $2`
+      : `SELECT ${ENTRY_CARD} ${ENTRY_FROM}
+          WHERE ${where}
+          ORDER BY e.published_at DESC, e.entry_id DESC
+          LIMIT $1 OFFSET $2`,
     params,
   );
   if ((q || author || tag) && page === 1) {
@@ -46,7 +56,7 @@ router.get('/entries', wrap(async (req, res) => {
       keyword: q || author || tag,
     });
   }
-  res.json({ entries: rows.slice(0, size), page, has_more: rows.length > size });
+  res.json({ entries: rows.slice(0, size), page, has_more: rows.length > size, sort, hot_days: HOT_DAYS });
 }));
 
 // ---- 讀取單篇 -----------------------------------------------------------

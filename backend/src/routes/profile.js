@@ -6,7 +6,7 @@ import * as storage from '../storage.js';
 import { query, tx } from '../db.js';
 import { wrap, badRequest, unavailable, notFound } from '../errors.js';
 import { requireLogin, requireActive } from '../auth.js';
-import { readableBy, canRead, lockEntryContext } from '../access.js';
+import { BLOG_VISIBLE, readableBy, canRead, lockEntryContext } from '../access.js';
 import { text, id, oneOf, paging } from '../validate.js';
 import { avatarSql, notify, REACTIONS } from '../people.js';
 
@@ -60,6 +60,59 @@ router.delete('/me/avatar', requireActive, wrap(async (req, res) => {
     [req.user.user_id],
   );
   await storage.remove(rows[0]?.avatar_url);
+  res.json({ ok: true });
+}));
+
+// ---- 個人主頁的背景圖：空間對讀者可見時才提供 ---------------------------
+const backgroundUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024, files: 1 },          // Vercel 函式的請求上限是 4.5 MB
+  fileFilter: (_req, file, cb) => {
+    if (MIME_EXT[file.mimetype]) cb(null, true);
+    else cb(badRequest('背景圖只接受 JPG、PNG 或 WebP'));
+  },
+});
+
+router.get('/blogs/:blogId/background', wrap(async (req, res) => {
+  const blogId = id(req.params.blogId, '空間代號', 'B');
+  const { rows } = await query(
+    `SELECT b.background_url FROM blog b JOIN user_account u ON u.user_id = b.user_id
+      WHERE b.blog_id = $1 AND (${BLOG_VISIBLE} OR b.user_id = $2)`,
+    [blogId, req.user?.user_id ?? null],
+  );
+  const file = rows[0]?.background_url ? await storage.read(rows[0].background_url) : null;
+  if (!file) throw notFound('沒有背景圖');
+  res.set('Content-Type', file.contentType);
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.send(file.buffer);
+}));
+
+router.put('/me/background', requireActive, backgroundUpload.single('background'), wrap(async (req, res) => {
+  if (!req.file) throw badRequest('請選擇一張圖片');
+  const location = await storage.save(`background-${crypto.randomUUID()}${MIME_EXT[req.file.mimetype]}`, req.file.buffer);
+  try {
+    const old = await tx(async (client) => {
+      const cur = await client.query('SELECT background_url FROM blog WHERE user_id = $1 FOR UPDATE', [req.user.user_id]);
+      await client.query('UPDATE blog SET background_url = $2 WHERE user_id = $1', [req.user.user_id, location]);
+      return cur.rows[0].background_url;
+    });
+    await storage.remove(old);
+    res.json({ ok: true });
+  } catch (err) {
+    await storage.remove(location);
+    throw err;
+  }
+}));
+
+router.delete('/me/background', requireActive, wrap(async (req, res) => {
+  const { rows } = await query(
+    `UPDATE blog b SET background_url = NULL
+       FROM (SELECT blog_id, background_url FROM blog WHERE user_id = $1 FOR UPDATE) old
+      WHERE b.blog_id = old.blog_id RETURNING old.background_url`,
+    [req.user.user_id],
+  );
+  await storage.remove(rows[0]?.background_url);
   res.json({ ok: true });
 }));
 

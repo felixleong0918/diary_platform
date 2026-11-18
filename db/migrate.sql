@@ -86,3 +86,14 @@ CREATE INDEX IF NOT EXISTS notification_user_idx    ON notification (user_id, cr
 CREATE INDEX IF NOT EXISTS notification_unread_idx  ON notification (user_id) WHERE read_at IS NULL;
 ALTER TABLE diary_reaction ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification   ENABLE ROW LEVEL SECURITY;
+
+-- 2026-11：個人主頁的自訂背景圖與主題套用範圍
+ALTER TABLE blog
+  ADD COLUMN IF NOT EXISTS background_url text,
+  ADD COLUMN IF NOT EXISTS theme_scope    varchar(6) NOT NULL DEFAULT 'header';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'blog_theme_scope_domain') THEN
+    ALTER TABLE blog ADD CONSTRAINT blog_theme_scope_domain CHECK (theme_scope IN ('header', 'page'));
+  END IF;
+END $$;
